@@ -68,26 +68,25 @@ def U(t):
 import warnings
 warnings.filterwarnings("ignore")
 
-def nicegrid(ax = plt):
+def jgrid(ax,hh = 9):
+    ax.grid(True, which='major', color='#666666', linestyle=':')
+    ax.grid(True, which='minor', color='#999999', linestyle=':', alpha=0.2)
+    try:
+        ax.axhline(y=0, color='k', linestyle='-',lw=1)
+        ax.axvline(x=0, color='k', linestyle='-',lw=1)
+    except:
+        ax.axhline(y=1, color='k', linestyle='--',lw=1)
+    ax.minorticks_on()
+    ax.xaxis.set_major_locator(ticker.LinearLocator(hh))
+    ax.xaxis.set_minor_locator(ticker.AutoMinorLocator(4))
+    ax.yaxis.set_minor_locator(ticker.AutoMinorLocator(4))
+    
+def nicegrid(ax):
     try: #if np.size(ax) > 1
         for ii in np.arange(len(ax)):
-            ax[ii].grid(True, which='major', color='#666666', linestyle=':')
-            ax[ii].grid(True, which='minor', color='#999999', linestyle=':', alpha=0.2)
-            try:
-                ax[ii].axhline(y=0, color='k', linestyle='-',lw=1)
-                ax[ii].axvline(x=0, color='k', linestyle='-',lw=1)
-            except:
-                ax[ii].axhline(y=1, color='k', linestyle='--',lw=1)
-            ax[ii].minorticks_on()
+            jgrid(ax[ii])
     except:
-        ax.grid(True, which='major', color='#666666', linestyle=':')
-        ax.grid(True, which='minor', color='#999999', linestyle=':', alpha=0.2)
-        try:
-            ax.axhline(y=0, color='k', linestyle='-',lw=1)
-            ax.axvline(x=0, color='k', linestyle='-',lw=1)
-        except:
-            ax.axhline(y=1, color='k', linestyle='--',lw=1)
-        ax.minorticks_on()
+        jgrid(ax)
             
 def caption(txt,fig, xloc=0.5, yloc=-0.05):
     fig.text(xloc, yloc, txt, ha='center',size=MEDIUM_SIZE,color='blue')
@@ -105,7 +104,7 @@ else:
 try:
     import google.colab
     IN_COLAB = True
-    print("\nOperating on Google Collab \n")
+    # don't need serial here
 except:
     IN_COLAB = False
 
@@ -117,6 +116,14 @@ except:
     colors = ['k','b','r','m','g']
 
 r2d = 180/np.pi
+rps2hz = 1/(2*np.pi)
 
-#text1 = "Clear that response closely matches input - i.e. input passes through the system"
-#plt.text(0., -0.15, text1, horizontalalignment='left',verticalalignment='center',transform=ax.transAxes,bbox=dict(facecolor='blue', alpha=0.2))
+# install control package
+if importlib.util.find_spec('control') is None:
+    !python3 -m pip install control
+
+# uncomment to install slycot package
+slycot_available = True
+if importlib.util.find_spec('slycot') is None:
+    #!pip install slycot
+    slycot_available = False
