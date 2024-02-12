@@ -12,6 +12,7 @@ import matplotlib
 import matplotlib.cm as cm
 from matplotlib.cm import get_cmap
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 from matplotlib.pyplot import figure, savefig
 from matplotlib import gridspec
 from matplotlib import rcParams
