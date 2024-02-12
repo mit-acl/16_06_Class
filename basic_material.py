@@ -117,13 +117,3 @@ except:
 
 r2d = 180/np.pi
 rps2hz = 1/(2*np.pi)
-
-# install control package
-if importlib.util.find_spec('control') is None:
-    !python3 -m pip install control
-
-# uncomment to install slycot package
-slycot_available = True
-if importlib.util.find_spec('slycot') is None:
-    #!pip install slycot
-    slycot_available = False
