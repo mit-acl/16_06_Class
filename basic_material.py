@@ -1,7 +1,7 @@
 from platform import python_version
 print("Running Python:",python_version())
 
-import shutil, sys, os.path, math, time, subprocess, random
+import shutil, sys, os.path, math, time, subprocess, random, importlib.util
 
 import numpy as np
 from numpy import logspace, linspace
@@ -26,7 +26,6 @@ plt.rcParams['axes.xmargin'] = 0
 plt.rcParams['axes.grid'] = True
 plt.rcParams["figure.autolayout"] = True
 
-#from sympy import *
 import sympy as sym
 from sympy import lambdify, oo, Symbol, integrate, Heaviside, plot, Piecewise
 from sympy import exp, plot, sin, cos, printing, init_printing, simplify
@@ -92,20 +91,15 @@ def nicegrid(ax):
 def caption(txt,fig, xloc=0.5, yloc=-0.05):
     fig.text(xloc, yloc, txt, ha='center',size=MEDIUM_SIZE,color='blue')
 
-if os.path.isdir("./data/"):
-    pass
-else:
+if not os.path.isdir("./data/"):
     os.mkdir("./data")
 
-if os.path.isdir("./figs/"):
-    pass
-else:
+if not os.path.isdir("./figs/"):
     os.mkdir("./figs")
 
 try:
     import google.colab
     IN_COLAB = True
-    # don't need serial here
 except:
     IN_COLAB = False
 
@@ -118,3 +112,17 @@ except:
 
 r2d = 180/np.pi
 rps2hz = 1/(2*np.pi)
+
+# install control package
+if importlib.util.find_spec('control') is None:
+    print("Installing Control Package")
+    os.system(f'python -m pip install control')
+else:
+    print("Control Package Found")
+
+# uncomment to install slycot package
+#slycot_available = False
+#if importlib.util.find_spec('slycot') is None:
+    #os.system(f'pip install slycot')
+    #slycot_available = True
+
