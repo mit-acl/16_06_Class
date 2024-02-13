@@ -205,7 +205,7 @@ class Step_info:
         ax.set_title('Step Response')
         ax.set_ylim(ylim)
         ax.set_xlim([0,max(self.t)])
-        nicegrid()
+        nicegrid(ax)
 
 def lead_design(G, wc_des = 1, PM = 45):
     j = np.complex(0,1)
