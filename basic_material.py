@@ -77,16 +77,17 @@ def jgrid(ax,hh = 9):
     except:
         ax.axhline(y=1, color='k', linestyle='--',lw=1)
     ax.minorticks_on()
-    ax.xaxis.set_major_locator(ticker.LinearLocator(hh))
+    if hh > 0:
+        ax.xaxis.set_major_locator(ticker.LinearLocator(hh))
     ax.xaxis.set_minor_locator(ticker.AutoMinorLocator(4))
     ax.yaxis.set_minor_locator(ticker.AutoMinorLocator(4))
     
-def nicegrid(ax):
+def nicegrid(ax, hh=9):
     try: #if np.size(ax) > 1
         for ii in np.arange(len(ax)):
-            jgrid(ax[ii])
+            jgrid(ax[ii],hh)
     except:
-        jgrid(ax)
+        jgrid(ax,hh)
             
 def caption(txt,fig, xloc=0.5, yloc=-0.05):
     fig.text(xloc, yloc, txt, ha='center',size=MEDIUM_SIZE,color='blue')
