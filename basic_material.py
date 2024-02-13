@@ -122,8 +122,9 @@ else:
     print("Control Package Found")
 
 # uncomment to install slycot package
-#slycot_available = False
-#if importlib.util.find_spec('slycot') is None:
+if importlib.util.find_spec('slycot') is None:
+    slycot_available = False
     #os.system(f'pip install slycot')
-    #slycot_available = True
+else:
+    slycot_available = True
 
