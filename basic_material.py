@@ -121,9 +121,9 @@ if importlib.util.find_spec('control') is None:
 else:
     print("Control Package Found")
 
-# uncomment to install slycot package
 if importlib.util.find_spec('slycot') is None:
     slycot_available = False
+    # uncomment to install slycot package
     #os.system(f'pip install slycot')
 else:
     slycot_available = True

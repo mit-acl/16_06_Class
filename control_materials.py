@@ -229,28 +229,7 @@ def lag_design(gain_inc = 10, gamma = 10, wc = 1):
     pl = zl/gain_inc
     Gc_lag = tf([1, zl],[1, pl]) # lag comp
     return Gc_lag 
-    
-def nicegrid(ax = plt):
-    try: #if np.size(ax) > 1
-        for ii in np.arange(len(ax)):
-            ax[ii].grid(True, which='major', color='#666666', linestyle=':')
-            ax[ii].grid(True, which='minor', color='#999999', linestyle=':', alpha=0.2)
-            try:
-                ax[ii].axhline(y=0, color='k', linestyle='-',lw=1)
-                ax[ii].axvline(x=0, color='k', linestyle='-',lw=1)
-            except:
-                ax[ii].axhline(y=1, color='k', linestyle='--',lw=1)
-            ax[ii].minorticks_on()
-    except:
-        ax.grid(True, which='major', color='#666666', linestyle=':')
-        ax.grid(True, which='minor', color='#999999', linestyle=':', alpha=0.2)
-        try:
-            ax.axhline(y=0, color='k', linestyle='-',lw=1)
-            ax.axvline(x=0, color='k', linestyle='-',lw=1)
-        except:
-            ax.axhline(y=1, color='k', linestyle='--',lw=1)
-        ax.minorticks_on()
-            
+                
 def find_wc(omega, G, mag = 1):
     return np.interp(mag,np.flipud(np.abs(G)),np.flipud(omega))
 
