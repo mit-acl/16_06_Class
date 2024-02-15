@@ -176,13 +176,21 @@ class Step_info:
             self.wn = 4/self.Ts/self.zeta
     
     def printout(self):
-        print("Tr: \t%4.2fs"%(self.Tr))
-        print("Ts: \t%4.2fs"%(self.Ts))
-        print("Mp: \t%4.2f"%(self.Mp))
-        print("Tp: \t%4.2fs"%(self.Tp))
-        print("Yss: \t%4.2f"%(self.Yss))
-        print("Zeta: \t%4.3f"%(self.zeta))
-        print("Wn: \t%4.3f"%(self.wn))
+        print("omega_n: \t%4.3f"%(self.wn))
+        print("zeta   : \t%4.3f"%(self.zeta))
+        print("Tr     : \t%4.2fs"%(self.Tr))
+        print("Ts     : \t%4.2fs"%(self.Ts))
+        print("Mp     : \t%4.2f"%(self.Mp))
+        print("Tp     : \t%4.2fs"%(self.Tp))
+        print("Yss    : \t%4.2f"%(self.Yss))
+
+        #for k in S:
+        #    if k in ['RiseTime','Overshoot','PeakTime','SettlingTime']:
+        #        try:
+        #            print(f"{k}: {S[k]:3.4}")
+        #        except:
+        #            print(f"{k}: {S[k]:4}")
+
         
     def nice_plot(self,ax):
         ylim=(np.floor(np.min(self.y)),np.ceil(10.*np.max(self.y))/10.0)
