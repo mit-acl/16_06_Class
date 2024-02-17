@@ -82,7 +82,7 @@ def jgrid(ax,hh = 9):
     ax.xaxis.set_minor_locator(ticker.AutoMinorLocator(4))
     ax.yaxis.set_minor_locator(ticker.AutoMinorLocator(4))
     
-def nicegrid(ax, hh=9):
+def nicegrid(ax, hh = -1):
     try: #if np.size(ax) > 1
         for ii in np.arange(len(ax)):
             jgrid(ax[ii],hh)

@@ -253,3 +253,9 @@ BIGGER_SIZE = 18
 
 def caption(txt,fig, xloc=0.5, yloc=-0.05):
     fig.text(xloc, yloc, txt, ha='center',size=MEDIUM_SIZE,color='blue')
+
+def my_pzmap(G,ax):
+    ax.plot(np.real(G.poles()),np.imag(G.poles()),'bx',ms=8,markerfacecolor=None)
+    ax.plot(np.real(G.zeros()),np.imag(G.zeros()),'o',ms=8,markeredgewidth=2, markeredgecolor='r',markerfacecolor=(1, 0, 0.2, 0.1))
+    ax.set_xlabel('Real')
+    ax.set_ylabel('Imaginary')
