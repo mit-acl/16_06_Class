@@ -96,7 +96,6 @@ def Root_Locus_design_cancel(G, s_target = complex(-1,2), s_cancel = -1):
     '''
     RL Lead design of Gc by placing/canceling pole at s_cancel to ensure that CLP are at s_target
     '''
-    
     phi_fromG = sum([cmath.phase(x) for x in (s_target - G.zeros())])*180/np.pi - \
                 sum([cmath.phase(x) for x in (s_target - G.poles())])*180/np.pi
 
@@ -113,9 +112,8 @@ def Root_Locus_design_cancel(G, s_target = complex(-1,2), s_cancel = -1):
 
     L = G*Gc    
     Gcl = feedback(L,1)
-    scl = Gcl.poles()
 
-    return Gc, scl
+    return Gc, Gcl.poles()
 
 def Root_Locus_design_ratio(G, s_target = complex(-1,2), gamma = 10):
     '''
