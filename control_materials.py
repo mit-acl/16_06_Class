@@ -213,7 +213,7 @@ class Step_info:
         ax.set_xlim([0,max(self.t)])
 
 def lead_design(G, wc_des = 1, PM = 45):
-    j = np.complex(0,1)
+    j = complex(0,1)
     Gf = G(j*wc_des)
     phi_G = cmath.phase(Gf)*r2d
     phi_m = (PM - (180 + phi_G))/r2d # robust?
