@@ -107,7 +107,7 @@ def Root_Locus_design_cancel(G, s_target = complex(-1,2), s_cancel = -1):
     p = Symbol('p')
     Gcpoles = solve(atan(s_target.imag/(p + s_target.real)) - phi_required*pi/180,p)
     Gc = tf((1,-Gczeros[0]), (1,float(Gcpoles[0])))
-    Gain = 1/np.real(G(s_target) * Gc(s_target))
+    Gain = -1/np.real(G(s_target) * Gc(s_target))
     Gc *= Gain
 
     L = G*Gc    
@@ -134,7 +134,7 @@ def Root_Locus_design_ratio(G, s_target = complex(-1,2), gamma = 10):
     Gcpoles = gamma*Gczeros
 
     Gc = tf((1, float(Gczeros)), (1,float(Gcpoles)))
-    Gain = 1/np.real(G(s_target) * Gc(s_target))
+    Gain = -1/np.real(G(s_target) * Gc(s_target))
     Gc *= Gain
 
     L = G*Gc
