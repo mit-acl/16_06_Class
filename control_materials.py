@@ -1,11 +1,10 @@
 import numpy as np 
-import cmath #sympy 
+import cmath 
 from sympy import Symbol, atan, pi, tan, sqrt, solve, log, symbols
 from numpy.polynomial import Polynomial
 from numpy import inf
 
-from control.matlab import TransferFunction, rlocus, step, feedback, lsim, tf
-#import control
+from control.matlab import tf, rlocus, step, feedback, lsim, tf
 from control import pade
 
 import matplotlib
@@ -40,8 +39,8 @@ def Root_Locus_gains(L, Krange = np.logspace(-3, 3, num=1000), Tol = 1e-4):
         pdr = pd.roots()
         #print(pdr)
         if len(L.num[0][0]) > 1: # confirm that dNds neq 0
-            dNds = TransferFunction(np.flip(dNdx.coef),1)
-            dDds = TransferFunction(np.flip(dDdx.coef),1)
+            dNds = tf(np.flip(dNdx.coef),1)
+            dDds = tf(np.flip(dDdx.coef),1)
             Kkeep = [-(dDds.horner(x.real)/dNds.horner(x.real))[0][0][0].real\
                      for x in pdr if abs(x.imag) < Tol]
         else:
@@ -100,14 +99,15 @@ def Root_Locus_design_cancel(G, s_target = complex(-1,2), s_cancel = -1):
                 sum([cmath.phase(x) for x in (s_target - G.poles())])*180/np.pi
 
     Gczeros = np.array([s_cancel]) # cancel smallest plant real pole
-    phi_fromGc = sum([cmath.phase(x) for x in (s_target - Gczeros)])*180/np.pi
-    phi_required = 180 + phi_fromG + phi_fromGc
+    phi_from_Gc = sum([cmath.phase(x) for x in (s_target - Gczeros)])*180/np.pi
+    phi_required = (180 + phi_fromG + phi_from_Gc)%360
     #print(phi_required)
     
+    # now solve the phase condition equation for the comp pole location
     p = Symbol('p')
     Gcpoles = solve(atan(s_target.imag/(p + s_target.real)) - phi_required*pi/180,p)
-    Gc = TransferFunction((1,-Gczeros[0]), (1,float(Gcpoles[0])))
-    Gain = 1/np.abs(G(s_target) * Gc(s_target))
+    Gc = tf((1,-Gczeros[0]), (1,float(Gcpoles[0])))
+    Gain = 1/np.real(G(s_target) * Gc(s_target))
     Gc *= Gain
 
     L = G*Gc    
@@ -126,25 +126,25 @@ def Root_Locus_design_ratio(G, s_target = complex(-1,2), gamma = 10):
     phi_required = (180 - phi_fromG)%360 
     #print(phi_required)
 
+    # now solve the phase condition equation for the comp zero location
+    # this implements the tan(A-B) = (tan(A) - tan(B)/(1+tan(A)tan(B)) condition in the notes 
     func = (s_target.imag/(z+s_target.real) - s_target.imag/(gamma*z+s_target.real))\
     /(1+(s_target.imag/(z+s_target.real))*(s_target.imag/(gamma*z+s_target.real)))
-
     Gczeros = max(solve(func - tan(phi_required*pi/180),z))
     Gcpoles = gamma*Gczeros
 
     Gc = tf((1, float(Gczeros)), (1,float(Gcpoles)))
-    Gain = 1/np.abs(G(s_target) * Gc(s_target))
+    Gain = 1/np.real(G(s_target) * Gc(s_target))
     Gc *= Gain
 
     L = G*Gc
     Gcl = feedback(L,1)
-    scl = Gcl.poles()
 
-    return Gc, scl
+    return Gc, Gcl.poles()
 
 class Step_info:
     # init method or constructor
-    def __init__(self,t,y,method = 0, t0=0, SettlingTimeLimits = [0.02], RiseTimeLimits = [0.1,0.9]):
+    def __init__(self,t,y, method = 0, t0 = 0, SettlingTimeLimits = [0.02], RiseTimeLimits = [0.1,0.9]):
         self.t = t
         self.y = y
         self.Yss = y[-1]
@@ -159,11 +159,11 @@ class Step_info:
         if settled < len(self.t):
             self.Ts = self.t[settled] - t0
         else:
-            self.Ts = 1000.
+            self.Ts = 0.  # avoids weird plot
         
         self.Mp = (self.y.max()/self.Yss-1)
         self.Tp = t[int(np.median(np.argwhere(self.y == self.y.max())))] - t0
-        if method == 0:
+        if method == 0: # which methods used to estimate zeta and wn from the step results
             print("Using Tp")
             self.zeta = 1/np.sqrt( 1 + (np.pi/np.log(self.Mp))**2 ) 
             self.wn = np.pi/self.Tp/np.sqrt(1-self.zeta**2)
@@ -198,8 +198,8 @@ class Step_info:
         ax.axvline(x = self.Tr_values[0],ymax=0.1*self.Yss/ymax,c='r',ls='dashed')
         ax.axvline(x = self.Tr_values[1],ymax=0.9*self.Yss/ymax,c='r',ls='dashed')
         ax.axvline(x = self.Ts,c='grey',ls='dashed')
-        ax.axhline(y = 1.02*self.Yss,c='grey',ls='dashed',lw=1)
-        ax.axhline(y = 0.98*self.Yss,c='grey',ls='dashed',lw=1)
+        ax.axhline(y = (1+SettlingTimeLimits)*self.Yss,c='grey',ls='dashed',lw=1)
+        ax.axhline(y = (1-SettlingTimeLimits)*self.Yss,c='grey',ls='dashed',lw=1)
         ax.axhline(y = self.Yss*(1 + self.Mp), xmin=0, xmax=self.Tp/max(self.t), c='green',ls='dashed',lw=2)
         ax.axvline(ymax = self.Yss*(1 + self.Mp)/ymax, x=self.Tp, c='m',ls='dashed',lw=2)
         ax.text(self.Tr/2,0.25*self.Yss,"Tr = {0:.2f}".format(self.Tr))
