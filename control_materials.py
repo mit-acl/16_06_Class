@@ -170,7 +170,10 @@ class Step_info:
             self.wn = np.pi/self.Tp/np.sqrt(1-self.zeta**2)
         else:
             print("Using Ts")
-            q = 4*self.Tp/np.pi/self.Ts
+            if self.SettlingTimeLimits[0] == 0.01:
+                q = 4.6*self.Tp/np.pi/self.Ts # 1% rule
+            else:
+                q = 4*self.Tp/np.pi/self.Ts # 2 % rule
             self.zeta = q / np.sqrt( 1 + q**2 )
             self.wn = 4/self.Ts/self.zeta
     
@@ -192,6 +195,7 @@ class Step_info:
 
         
     def nice_plot(self,ax):
+        print(f"Using {self.SettlingTimeLimits[0] = :4.2f}")
         ylim=(np.floor(np.min(self.y)),np.ceil(10.*np.max(self.y))/10.0)
         ax.plot(self.t,self.y,'b')
         ymax = np.max(ylim) # needed for plot scaling
