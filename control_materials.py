@@ -148,6 +148,7 @@ class Step_info:
         self.t = t
         self.y = y
         self.Yss = y[-1]
+        self.SettlingTimeLimits = SettlingTimeLimits
         sgnYss = np.sign(self.Yss.real)
 
         tr_lower_index = np.where(sgnYss * (self.y - RiseTimeLimits[0] * self.Yss) >= 0)[0][0]
