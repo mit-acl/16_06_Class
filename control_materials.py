@@ -141,7 +141,7 @@ def Root_Locus_design_ratio(G, s_target = complex(-1,2), gamma = 10):
     Gcl = feedback(L,1)
 
     return Gc, Gcl.poles()
-
+ 
 class Step_info:
     # init method or constructor
     def __init__(self,t,y, method = 0, t0 = 0, SettlingTimeLimits = [0.02], RiseTimeLimits = [0.1,0.9]):
