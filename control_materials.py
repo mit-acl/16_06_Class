@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 r2d = 180/np.pi
 
 # add break-in gains to improve plot
-def Root_Locus_gains(L, Krange = np.logspace(-3, 3, num=1000), Tol = 1e-4):
+def Root_Locus_gains(L, Krange = np.logspace(-3, 3, num=1000), Tol = 1e-4, return_k_s = False):
     ''' 
     Augment the RL gains to include the break-in/break-out pts
     Thus leading to a better plot.
@@ -24,10 +24,9 @@ def Root_Locus_gains(L, Krange = np.logspace(-3, 3, num=1000), Tol = 1e-4):
 
     '''
     #which RL
-    if min(Krange) >= 0:
+    RL_pos = False
+    if min(Krange) >=  0:
         RL_pos = True
-    else:
-        RL_pos = False
     Krange = np.sort(np.append(Krange,0)) # add zero
 
     try:
@@ -37,7 +36,6 @@ def Root_Locus_gains(L, Krange = np.logspace(-3, 3, num=1000), Tol = 1e-4):
         dDdx = D.deriv()
         pd = dNdx*D - dDdx*N
         pdr = pd.roots()
-        #print(pdr)
         if len(L.num[0][0]) > 1: # confirm that dNds neq 0
             dNds = tf(np.flip(dNdx.coef),1)
             dDds = tf(np.flip(dDdx.coef),1)
@@ -54,22 +52,24 @@ def Root_Locus_gains(L, Krange = np.logspace(-3, 3, num=1000), Tol = 1e-4):
                 ll[-1] += k
                 sol = solve(ll,[*syms,k],dict=True)
                 Kkeep = np.append(Kkeep,float(sol[0][k]))
-        if RL_pos:
-            Kkeep = [x for x in Kkeep if ((x >= 0) and (x < inf))]
+        if RL_pos: # only look at the relevant sign K values depending on which RL is being drawn
+            Kkeep = [x for x in Kkeep if ((x >= 0) and (x < inf))] 
         else:
-            Kkeep = [x for x in Kkeep if ((x < 0) and (x < inf))]
+            Kkeep = [x for x in Kkeep if ((x < 0) and (x > -inf))]
         if len(Kkeep) > 0:
             Krange = np.sort(np.append(Krange,Kkeep))
             for kk in Kkeep:
-                Gcl_temp = feedback(L,kk)
+                Gcl_temp = feedback(L*kk,1)
                 real_poles = [np.round(x.real,5) for x in Gcl_temp.poles() if abs(x.imag) < Tol]
                 double_real_poles = set([x for x in real_poles if real_poles.count(x) > 1])
                 print("\nFound breakin/out at K = {:4.3f}".format(kk))
                 print("At possible locations s = "+', '.join('{:4.3f}'.format(x.real) for x in double_real_poles))
+        else:
+            double_real_poles = []
     except:
         print("Gain augmentation failed")
-    return Krange
-
+    return Krange if return_k_s == False else Krange,Kkeep,double_real_poles
+    
 def RL_COM(L):
     ''' Find the CoM of a RL for L(s)
 
