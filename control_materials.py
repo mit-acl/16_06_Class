@@ -24,9 +24,9 @@ def Root_Locus_gains(L, Krange = np.logspace(-3, 3, num=1000), Tol = 1e-4, retur
 
     '''
     #which RL
-    RL_pos = False
-    if min(Krange) >=  0:
-        RL_pos = True
+    RL_pos = True
+    if max(Krange) <  0:
+        RL_pos = False
     Krange = np.sort(np.append(Krange,0)) # add zero
 
     try:
@@ -68,10 +68,11 @@ def Root_Locus_gains(L, Krange = np.logspace(-3, 3, num=1000), Tol = 1e-4, retur
             double_real_poles = []
     except:
         print("Gain augmentation failed")
-    return Krange if return_k_s == False else Krange,Kkeep,double_real_poles
+    return Krange #if return_k_s == False else Krange,Kkeep,double_real_poles
     
 def RL_COM(L):
-    ''' Find the CoM of a RL for L(s)
+    ''' 
+    Find the CoM of a RL for L(s)
 
     in:     L(s)    - system for RL
 
@@ -79,11 +80,10 @@ def RL_COM(L):
             Ang     - angle of asymptotes in degrees
 
     if # poles = # zeros then avoids division by zero and returns None
-
     '''
     np = len(L.poles()) 
     nz = len(L.zeros())
-    if (np > nz):
+    if (np >= nz+2):
         CoM = (sum([x for x in L.poles()]) - sum([x for x in L.zeros()]))/(np - nz)
         Ang = 180.0/(np - nz) % 360.0
     else:
