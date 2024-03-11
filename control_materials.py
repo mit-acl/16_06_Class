@@ -35,23 +35,28 @@ def Root_Locus_gains(L, Krange = np.logspace(-3, 3, num=1000), Tol = 1e-4, retur
         D = Polynomial(np.flip(L.den[0][0]))
         dDdx = D.deriv()
         pd = dNdx*D - dDdx*N
-        pdr = pd.roots()
-        if len(L.num[0][0]) > 1: # confirm that dNds neq 0
-            dNds = tf(np.flip(dNdx.coef),1)
-            dDds = tf(np.flip(dDdx.coef),1)
-            Kkeep = [-(dDds.horner(x.real)/dNds.horner(x.real))[0][0][0].real\
-                     for x in pdr if abs(x.imag) < Tol]
-        else:
-            Kkeep = []
-            n = len(L.den[0][0])
-            syms = symbols('b:'+str(n-1))
-            k = Symbol('k')
-            for p in -pdr:
-                l = np.convolve([1, p],[*syms])
-                ll = [L.den[0][0][kk] - l[kk] for kk in range(len(l))]
-                ll[-1] += k
-                sol = solve(ll,[*syms,k],dict=True)
-                Kkeep = np.append(Kkeep,float(sol[0][k]))
+        pdr = pd.roots() # candidate values of s for break-in/break-out pts
+
+        Kkeep = [-1/np.real(L(x)) for x in pdr if abs(x.imag) < Tol] # k = -1/L(s) if s in pdr is real
+
+        if 0:
+            if len(L.num[0][0]) > 1: # confirm that dNds neq 0
+                dNds = tf(np.flip(dNdx.coef),1)
+                dDds = tf(np.flip(dDdx.coef),1)
+                Kkeep = [-(dDds.horner(x.real)/dNds.horner(x.real))[0][0][0].real\
+                         for x in pdr if abs(x.imag) < Tol]
+            else:
+                Kkeep = []
+                n = len(L.den[0][0])
+                syms = symbols('b:'+str(n-1))
+                k = Symbol('k')
+                for p in -pdr:
+                    l = np.convolve([1, p],[*syms])
+                    ll = [L.den[0][0][kk] - l[kk] for kk in range(len(l))]
+                    ll[-1] += k
+                    sol = solve(ll,[*syms,k],dict=True)
+                    Kkeep = np.append(Kkeep,float(sol[0][k]))
+
         if RL_pos: # only look at the relevant sign K values depending on which RL is being drawn
             Kkeep = [x for x in Kkeep if ((x >= 0) and (x < inf))] 
         else:
