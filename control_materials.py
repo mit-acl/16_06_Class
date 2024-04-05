@@ -10,9 +10,10 @@ from control import pade
 import matplotlib
 import matplotlib.pyplot as plt
 r2d = 180/np.pi
+tpi = 2*np.pi
 
 # add break-in gains to improve plot
-def Root_Locus_gains(L, Krange = np.logspace(-3, 3, num=1000), Tol = 1e-4, return_k_s = False):
+def Root_Locus_gains(L, Krange = np.logspace(-3, 3, num=1000), Tol = 1e-3, return_k_s = False):
     ''' 
     Augment the RL gains to include the break-in/break-out pts
     Thus leading to a better plot.
