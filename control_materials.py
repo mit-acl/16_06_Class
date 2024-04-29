@@ -228,7 +228,7 @@ def lead_design(G, wc_des = 1, PM = 45):
     Gf = G(j*wc_des)
     phi_G = cmath.phase(Gf)*r2d
     phi_m = (PM - (180 + phi_G))/r2d # robust?
-    zdp = (1-np.sin(phi_m))/(1+np.sin(phi_m))
+    zdp = (1 - np.sin(phi_m))/(1 + np.sin(phi_m))
     z = np.sqrt(wc_des**2*zdp)
     p = z/zdp
     Gc_lead = tf([1, z],[1, p]) 
