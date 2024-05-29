@@ -229,7 +229,7 @@ def lead_design(G, wc_des = 1, PM = 45):
     phi_G = cmath.phase(Gf)*r2d
     phi_m = (PM - (180 + phi_G))/r2d # robust?
     zdp = (1 - np.sin(phi_m))/(1 + np.sin(phi_m))
-    z = np.sqrt(wc_des**2*zdp)
+    z = wc_des*np.sqrt(zdp)
     p = z/zdp
     Gc_lead = tf([1, z],[1, p]) 
     L = G*Gc_lead
@@ -238,16 +238,26 @@ def lead_design(G, wc_des = 1, PM = 45):
     return Gc_lead
 
 def lag_design(gain_inc = 10, gamma = 10, wc = 1):
-    # gain_inc: goal for adding the lag
-    # gamma = 10: heuristic design approach
-    # wc: design goal
+    '''
+    gain_inc: goal for adding the lag
+    gamma = 10: heuristic design approach
+    wc: design goal
+    '''
     zl = wc/gamma 
     pl = zl/gain_inc
     Gc_lag = tf([1, zl],[1, pl]) # lag comp
     return Gc_lag 
                 
-def find_wc(omega, G, mag = 1):
-    return np.interp(mag,np.flipud(np.abs(G)),np.flipud(omega))
+def find_wc(omega, Gf, mag = 1):
+    return np.interp(mag,np.flipud(np.abs(Gf)),np.flipud(omega))
+
+def find_wpi(omega, Gf, phi = np.pi):
+    '''
+    
+    find gain of phase = pi 
+
+    '''
+    return np.interp(phi, np.abs(np.unwrap(np.angle(Gf))), omega)
 
 def pshift(Gp):
     while (np.max(Gp) < -np.pi):
@@ -268,3 +278,13 @@ def my_pzmap(G,ax):
     ax.plot(np.real(G.zeros()),np.imag(G.zeros()),'o',ms=8,markeredgewidth=2, markeredgecolor='r',markerfacecolor=(1, 0, 0.2, 0.1))
     ax.set_xlabel('Real')
     ax.set_ylabel('Imaginary')
+
+def Read_data(file_name,comments=['#','F'],cols=[0]):
+    '''
+
+    Full file_name
+    comments=['#','F'] for AD2 data
+    cols=[0]
+    
+    '''
+    return np.loadtxt(file_name,comments=comments,delimiter=',',usecols=cols)
