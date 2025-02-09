@@ -1,6 +1,11 @@
 from platform import python_version
 print("Running Python:",python_version())
 
+if float(python_version()[2:4]) > 10:
+    new_root_locus_color_string = True
+else:
+    new_root_locus_color_string = False
+
 import shutil, sys, os.path, math, time, subprocess, random, importlib.util
 
 import numpy as np

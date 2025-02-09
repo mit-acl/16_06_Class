@@ -207,6 +207,7 @@ class Step_info:
     def nice_plot(self,ax):
         try:
             print(f"Using {self.SettlingTimeLimits[0] = :4.2f}")
+            self.SettlingTimeLimits = self.SettlingTimeLimits[0]
         except:
             print(f"Using {self.SettlingTimeLimits = :4.2f}")
             
