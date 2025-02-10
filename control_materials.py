@@ -331,11 +331,16 @@ def caption(txt,fig, xloc=0.5, yloc=-0.05):
 
 ####################################################################
 ####################################################################
-def my_pzmap(G,ax):
+def my_pzmap(G,ax = None):
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 5))
     ax.plot(np.real(G.poles()),np.imag(G.poles()),'bx',ms=6,markerfacecolor=None)
     ax.plot(np.real(G.zeros()),np.imag(G.zeros()),'o',ms=6,markeredgewidth=2, markeredgecolor='r',markerfacecolor='r')
     ax.set_xlabel('Real')
     ax.set_ylabel('Imaginary')
+    ax.set_title('Pole-Zero Map')
+    ax.grid(True)
+    return ax
 
 def color_rl(ax):
     for kk in range(0, len(ax.lines)):
@@ -467,6 +472,10 @@ def balred(G, order = None, DCmatch = False, check = False, Tol = 1e-5):
 
     return Gr if convert_to_TF else control.tf2ss(Gr) 
 
+####################################################################
+
+def pretty_row_print(X,msg = ''):
+    print(msg + ', '.join('({0.real:.2f} + {0.imag:.2f}i)'.format(x) if np.iscomplex(x) else '{:.3f}'.format(x.real) for x in X))
 
 ####################################################################
 ####################################################################
