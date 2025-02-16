@@ -41,11 +41,10 @@ def Root_Locus_gains(L, Krange = None, Tol = 1e-3, standard_locus = True, Tol_ma
     
     try:
         Num = L.num[0][0]
+        Den = L.den[0][0]
         dNds = np.polyder(Num)
-        D = L.den[0][0]
-        dDds = np.polyder(D)
-        pd = dNds*D - dDds*Num
-        pdr = pd.roots() # candidate values of s for break-in/break-out pts
+        dDds = np.polyder(Den)
+        pdr = np.roots(np.convolve(dNds,Den) - np.convolve(dDds,Num))
 
         Kkeep = [-1/np.real(L(x)) for x in pdr if abs(x.imag) < Tol] # k = -1/L(s) if s in pdr is real
         if standard_locus: # only look at the relevant sign K values depending on which RL is being drawn
