@@ -107,8 +107,8 @@ def jgrid(ax,hh = 9):
     ax.minorticks_on()
     if hh > 0:
         ax.xaxis.set_major_locator(ticker.LinearLocator(hh))
-    ax.xaxis.set_minor_locator(ticker.AutoMinorLocator(4))
-    ax.yaxis.set_minor_locator(ticker.AutoMinorLocator(4))
+    ax.xaxis.set_minor_locator(ticker.AutoMinorLocator(5))
+    ax.yaxis.set_minor_locator(ticker.AutoMinorLocator(5))
     
 
 ####################################################################
