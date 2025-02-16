@@ -44,7 +44,13 @@ def Root_Locus_gains(L, Krange = None, Tol = 1e-3, standard_locus = True, Tol_ma
         Den = L.den[0][0]
         dNds = np.polyder(Num)
         dDds = np.polyder(Den)
-        pdr = np.roots(np.convolve(dNds,Den) - np.convolve(dDds,Num))
+        part1 = np.convolve(dNds, Den)
+        part2 = np.convolve(Num, dDds)
+        if len(part1) > len(part2):
+            part2 = np.pad(part2, (0, len(part1) - len(part2)), 'constant')
+        elif len(part2) > len(part1):
+            part1 = np.pad(part1, (0, len(part2) - len(part1)), 'constant')
+        pdr = np.roots(part1 - part2) # poles of dL/ds
 
         Kkeep = [-1/np.real(L(x)) for x in pdr if abs(x.imag) < Tol] # k = -1/L(s) if s in pdr is real
         if standard_locus: # only look at the relevant sign K values depending on which RL is being drawn
