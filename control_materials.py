@@ -40,11 +40,11 @@ def Root_Locus_gains(L, Krange = None, Tol = 1e-3, standard_locus = True, Tol_ma
     Krange = np.sort(np.append(Krange,0)) # add zero
     
     try:
-        Num = Polynomial(np.flip(L.num[0][0]))
-        dNdx = Num.deriv()
-        D = Polynomial(np.flip(L.den[0][0]))
-        dDdx = D.deriv()
-        pd = dNdx*D - dDdx*Num
+        Num = L.num[0][0]
+        dNds = np.polyder(Num)
+        D = L.den[0][0]
+        dDds = np.polyder(D)
+        pd = dNds*D - dDds*Num
         pdr = pd.roots() # candidate values of s for break-in/break-out pts
 
         Kkeep = [-1/np.real(L(x)) for x in pdr if abs(x.imag) < Tol] # k = -1/L(s) if s in pdr is real
