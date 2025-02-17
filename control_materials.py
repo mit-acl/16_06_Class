@@ -47,9 +47,9 @@ def Root_Locus_gains(L, Krange = None, Tol = 1e-3, standard_locus = True, Tol_ma
         part1 = np.convolve(dNds, Den)
         part2 = np.convolve(Num, dDds)
         if len(part1) > len(part2):
-            part2 = np.pad(part2, (0, len(part1) - len(part2)), 'constant')
+            part2 = np.pad(part2, (len(part1) - len(part2),0), 'constant')
         elif len(part2) > len(part1):
-            part1 = np.pad(part1, (0, len(part2) - len(part1)), 'constant')
+            part1 = np.pad(part1, (len(part2) - len(part1),0), 'constant')
         pdr = np.roots(part1 - part2) # poles of dL/ds
 
         Kkeep = [-1/np.real(L(x)) for x in pdr if abs(x.imag) < Tol] # k = -1/L(s) if s in pdr is real
@@ -483,6 +483,19 @@ def pretty_row_print(X,msg = ''):
     print(msg + ', '.join('({0.real:.2f} + {0.imag:.2f}i)'.format(x) if np.iscomplex(x) else '{:.3f}'.format(x.real) for x in X))
 
 ####################################################################
+
+def feedback_ff(G, K, Kff): 
+    NGDC = np.convolve(G.num[0][0], K.den[0][0])
+    NGNC = np.convolve(G.num[0][0], K.num[0][0])
+    DGDC = np.convolve(G.den[0][0], K.den[0][0])
+
+    max_len = max(len(DGDC), len(NGNC), len(NGDC))
+    NGNC = np.pad(NGNC, (max_len - len(NGNC), 0), 'constant')
+    NGDC = np.pad(NGDC, (max_len - len(NGDC), 0), 'constant')
+    DGDC = np.pad(DGDC, (max_len - len(DGDC), 0), 'constant')
+
+    return tf(Kff*NGDC+NGNC,DGDC+NGNC)
+
 ####################################################################
 if __name__ == "__main__":
     pass
