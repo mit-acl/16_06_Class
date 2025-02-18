@@ -43,7 +43,11 @@ def Root_Locus_gains(L, Krange = None, Tol = 1e-3, standard_locus = True, Tol_ma
         Num = L.num[0][0]
         Den = L.den[0][0]
         dNds = np.polyder(Num)
+        if dNds.size == 0:
+            dNds = np.array([0])
         dDds = np.polyder(Den)
+        if dDds.size == 0:
+            dDds = np.array([0])
         part1 = np.convolve(dNds, Den)
         part2 = np.convolve(Num, dDds)
         # make sure same size so we can add them
