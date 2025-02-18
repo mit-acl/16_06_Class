@@ -46,10 +46,10 @@ def Root_Locus_gains(L, Krange = None, Tol = 1e-3, standard_locus = True, Tol_ma
         dDds = np.polyder(Den)
         part1 = np.convolve(dNds, Den)
         part2 = np.convolve(Num, dDds)
-        if len(part1) > len(part2):
-            part2 = np.pad(part2, (len(part1) - len(part2),0), 'constant')
-        elif len(part2) > len(part1):
-            part1 = np.pad(part1, (len(part2) - len(part1),0), 'constant')
+        # make sure same size so we can add them
+        max_len = max(len(part1), len(part2))
+        part1 = np.pad(part1, (max_len - len(part1), 0), 'constant')
+        part2 = np.pad(part2, (max_len - len(part2), 0), 'constant')
         pdr = np.roots(part1 - part2) # poles of dL/ds
 
         Kkeep = [-1/np.real(L(x)) for x in pdr if abs(x.imag) < Tol] # k = -1/L(s) if s in pdr is real
@@ -485,10 +485,31 @@ def pretty_row_print(X,msg = ''):
 ####################################################################
 
 def feedback_ff(G, K, Kff): 
-    NGDC = np.convolve(G.num[0][0], K.den[0][0])
-    NGNC = np.convolve(G.num[0][0], K.num[0][0])
-    DGDC = np.convolve(G.den[0][0], K.den[0][0])
+    # polynomial level analysis to make sure that we a min order result
+    """
+    Feedback with feedforward control
+    G: N/D
+    K: Nc/Dc
+    Kff: gain
+    
+    returns
+    Gcl: (Kff+K)*G/(1+K*G)
+    """
+    if not isinstance(G, control.TransferFunction):
+        G = control.tf(G)
+    if not isinstance(K, control.TransferFunction):
+        K = control.tf(K)
 
+    NG = G.num[0][0]
+    DG = G.den[0][0]
+    NC = K.num[0][0]
+    DC = K.den[0][0]
+    
+    NGDC = np.convolve(NG, DC)
+    NGNC = np.convolve(NG, NC)
+    DGDC = np.convolve(DG, DC)
+
+    # make sure the lengths are the same so we can add them
     max_len = max(len(DGDC), len(NGNC), len(NGDC))
     NGNC = np.pad(NGNC, (max_len - len(NGNC), 0), 'constant')
     NGDC = np.pad(NGDC, (max_len - len(NGDC), 0), 'constant')
