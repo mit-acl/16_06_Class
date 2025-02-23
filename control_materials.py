@@ -83,7 +83,7 @@ def Root_Locus_gains(L, Krange = None, Tol = 1e-3, standard_locus = True, Tol_ma
     
 ####################################################################
 ####################################################################
-def RL_COM(L):
+def RL_COM(L,standard_locus = True):
     ''' 
     Find the CoM of a RL for L(s)
 
@@ -96,12 +96,27 @@ def RL_COM(L):
     '''
     np = len(L.poles()) 
     nz = len(L.zeros())
-    if (np >= nz+2): # recall that we need 2 more poles than zeros for CoM of asymptotes to exist
-        CoM = (sum([x for x in L.poles()]) - sum([x for x in L.zeros()]))/(np - nz)
+    
+    if np <= nz: # no asymptotes or improper system
+        CoM = None
+        Ang = None
+        return CoM, Ang
+    
+    if np == (nz + 1): # one asymptote
+        CoM = None
+        if standard_locus:
+            Ang = 180.0
+        else:
+            Ang = 0.0
+        return CoM, Ang
+    
+    # here np >= nz + 2    
+    # recall that we need 2 more poles than zeros for CoM of asymptotes to exist
+    CoM = (sum([x for x in L.poles()]) - sum([x for x in L.zeros()]))/(np - nz)
+    if standard_locus:
         Ang = 180.0/(np - nz) % 360.0
     else:
-        CoM = None
-        Ang = None    
+        Ang = 360.0/(np - nz) % 360.0
     return CoM, Ang
 
 ####################################################################
