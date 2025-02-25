@@ -21,6 +21,7 @@ import matplotlib.ticker as ticker
 from matplotlib.pyplot import figure, savefig
 from matplotlib import gridspec
 from matplotlib import rcParams
+from matplotlib.lines import Line2D
 rcParams["font.serif"] = "cmr14"
 rcParams.update({'font.size': 18})
 plt.rcParams['figure.figsize'] = [8, 5.0]

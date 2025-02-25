@@ -154,20 +154,23 @@ def Root_Locus_design_ratio(G, s_target = complex(-1,2), gamma = 10):
     z = Symbol('z')
     phi_fromG = sum([cmath.phase(x) for x in (s_target - G.zeros())]) - \
                 sum([cmath.phase(x) for x in (s_target - G.poles())])
-    #print(phi_fromG)
+    print(f"{phi_fromG*r2d = :4.2f}")
     phi_required = (np.pi - phi_fromG)%(2*np.pi)
-    #print(phi_required)
+    print(f"{phi_required*r2d = :4.2f}")
 
     # now solve the phase condition equation for the comp zero location
     # this implements the tan(A-B) = (tan(A) - tan(B)/(1+tan(A)tan(B)) condition in the notes 
     func = (s_target.imag/(z+s_target.real) - s_target.imag/(gamma*z+s_target.real))\
     /(1+(s_target.imag/(z+s_target.real))*(s_target.imag/(gamma*z+s_target.real)))
-    Gczeros = max(solve(func - tan(phi_required*pi/180),z))
+    Gczeros = max(solve(func - tan(phi_required),z))
     Gcpoles = gamma*Gczeros
+    print(f"{Gczeros = :4.2f}")
+    print(f"{Gcpoles = :4.2f}")
 
     Gc = tf((1, float(Gczeros)), (1,float(Gcpoles)))
     Gain = -1/np.real(G(s_target) * Gc(s_target))
     Gc *= Gain
+    print(f"{Gain = :4.2f}")
 
     L = G*Gc
     Gcl = feedback(L,1)
@@ -228,33 +231,40 @@ class Step_info:
         #            print(f"{k}: {S[k]:4}")
 
         
-    def nice_plot(self,ax):
+    def nice_plot(self,ax, Tmax = None, Ymax = None):
+        if Ymax is None:
+            ylim=(np.floor(np.min(self.y)),np.ceil(10.*np.max(self.y))/10.0)
+            Ymax = np.max(ylim) # needed for plot scaling
+        if Tmax is None:
+            Tmax = np.max(self.t)
+
         try:
             print(f"Using {self.SettlingTimeLimits[0] = :4.2f}")
             self.SettlingTimeLimits = self.SettlingTimeLimits[0]
         except:
             print(f"Using {self.SettlingTimeLimits = :4.2f}")
             
-        ylim=(np.floor(np.min(self.y)),np.ceil(10.*np.max(self.y))/10.0)
+        # the response
         ax.plot(self.t,self.y,'b')
-        ymax = np.max(ylim) # needed for plot scaling
-
-        ax.axvline(x = self.Tr_values[0],ymax=0.1*self.Yss/ymax,c='r',ls='dashed')
-        ax.axvline(x = self.Tr_values[1],ymax=0.9*self.Yss/ymax,c='r',ls='dashed')
-        ax.axvline(x = self.Ts,c='grey',ls='dashed')
-        ax.axhline(y = (1+self.SettlingTimeLimits)*self.Yss,c='grey',ls='dashed',lw=1)
-        ax.axhline(y = (1-self.SettlingTimeLimits)*self.Yss,c='grey',ls='dashed',lw=1)
-        ax.axhline(y = self.Yss*(1 + self.Mp), xmin=0, xmax=self.Tp/max(self.t), c='green',ls='dashed',lw=2)
-        ax.axvline(ymax = self.Yss*(1 + self.Mp)/ymax, x=self.Tp, c='m',ls='dashed',lw=2)
-        ax.text(self.Tr/2,0.25*self.Yss,"Tr = {0:.2f}".format(self.Tr))
-        ax.text(self.Tp,0.75*self.Yss,"Tp = {0:.2f}".format(self.Tp))
-        ax.text(self.Ts,0.5*self.Yss,"Ts = {0:.2f}".format(self.Ts))
-        ax.text(self.Tp*1.1,self.Yss*(1 + self.Mp),"Mp = {0:.2f}".format(self.Mp))
+        # vertical lines at Tr, Tp, Ts
+        ax.axvline(x = self.Tr_values[0],ymax=0.1*self.Yss/Ymax,c='r',ls='dashed')
+        ax.axvline(x = self.Tr_values[1],ymax=0.9*self.Yss/Ymax,c='r',ls='dashed')
+        ax.axvline(x = self.Ts,ymax=self.Yss/Ymax,c='grey',ls='dashed')
+        ax.axvline(ymax = self.Yss*(1 + self.Mp)/Ymax, x=self.Tp, c='m',ls='dashed',lw=2)
+        # horizontal lines at Yss, Mp, SettlingTimeLimits
+        ax.axhline(y = (1+self.SettlingTimeLimits)*self.Yss,xmin=self.Ts/Tmax,c='grey',ls='dashed',lw=1)
+        ax.axhline(y = (1-self.SettlingTimeLimits)*self.Yss,xmin=self.Ts/Tmax,c='grey',ls='dashed',lw=1)
+        ax.plot((0, self.Tp), (self.Yss*(1 + self.Mp), self.Yss*(1 + self.Mp)), c='green',ls='dashed',lw=2)
+        # add text to the plot
+        ax.text(self.Tr/2, 0.25*self.Yss, "Tr = {0:.2f}".format(self.Tr), fontsize=SMALL_SIZE)
+        ax.text(self.Tp, 0.75*self.Yss, "Tp = {0:.2f}".format(self.Tp), fontsize=SMALL_SIZE)
+        ax.text(self.Ts, 0.5*self.Yss, "Ts = {0:.2f}".format(self.Ts), fontsize=SMALL_SIZE)
+        ax.text(self.Tp*1.1, self.Yss*(1 + self.Mp), "Mp = {0:.2f}".format(self.Mp), fontsize=SMALL_SIZE)
         ax.set_xlabel('time [s]')
         ax.set_ylabel('Response')
         ax.set_title('Step Response')
-        ax.set_ylim(ylim)
-        ax.set_xlim([0,max(self.t)])
+        ax.set_ylim(0,Ymax)
+        ax.set_xlim(0,Tmax)
 
 ####################################################################
 ####################################################################
