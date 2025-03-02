@@ -146,11 +146,9 @@ def Root_Locus_design_cancel(G, s_target = complex(-1,2), s_cancel = -1, verbose
         print(f"{phi_fromG*r2d = :4.2f}")
         print(f"{phi_from_Gc*r2d = :4.2f}")
         print(f"{phi_required*r2d = :4.2f}")
-        print(f"{Gczeros = :4.2f}")
-        print(f"{Gcpoles = :4.2f}")
+        print(f"{Gczeros[0][0] = :4.2f}")
+        print(f"{Gcpoles[0][0] = :4.2f}")
         print(f"{Gain = :4.2f}")
-        print(f"{L = }")
-        print(f"{Gcl = }")
 
     return Gc, Gcl.poles()
 
