@@ -121,7 +121,7 @@ def RL_COM(L,standard_locus = True):
 
 ####################################################################
 ####################################################################
-def Root_Locus_design_cancel(G, s_target = complex(-1,2), s_cancel = -1):
+def Root_Locus_design_cancel(G, s_target = complex(-1,2), s_cancel = -1, verbose = False):
     '''
     RL Lead design of Gc by placing/canceling pole at s_cancel to ensure that CLP are at s_target
     '''
@@ -131,7 +131,6 @@ def Root_Locus_design_cancel(G, s_target = complex(-1,2), s_cancel = -1):
     Gczeros = np.array([s_cancel]) # cancel smallest plant real pole
     phi_from_Gc = sum([cmath.phase(x) for x in (s_target - Gczeros)])*180/np.pi
     phi_required = (180 + phi_fromG + phi_from_Gc)%360
-    #print(phi_required)
     
     # now solve the phase condition equation for the comp pole location
     p = Symbol('p')
@@ -142,6 +141,16 @@ def Root_Locus_design_cancel(G, s_target = complex(-1,2), s_cancel = -1):
 
     L = G*Gc    
     Gcl = feedback(L,1)
+
+    if verbose:
+        print(f"{phi_fromG*r2d = :4.2f}")
+        print(f"{phi_from_Gc*r2d = :4.2f}")
+        print(f"{phi_required*r2d = :4.2f}")
+        print(f"{Gczeros = :4.2f}")
+        print(f"{Gcpoles = :4.2f}")
+        print(f"{Gain = :4.2f}")
+        print(f"{L = }")
+        print(f"{Gcl = }")
 
     return Gc, Gcl.poles()
 
