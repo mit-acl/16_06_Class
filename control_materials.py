@@ -125,29 +125,29 @@ def Root_Locus_design_cancel(G, s_target = complex(-1,2), s_cancel = -1, verbose
     '''
     RL Lead design of Gc by placing/canceling pole at s_cancel to ensure that CLP are at s_target
     '''
-    phi_fromG = sum([cmath.phase(x) for x in (s_target - G.zeros())])*180/np.pi - \
-                sum([cmath.phase(x) for x in (s_target - G.poles())])*180/np.pi
+    phi_fromG = sum([cmath.phase(x) for x in (s_target - G.zeros())])*r2d - \
+                sum([cmath.phase(x) for x in (s_target - G.poles())])*r2d
 
-    Gczeros = np.array([s_cancel]) # cancel smallest plant real pole
-    phi_from_Gc = sum([cmath.phase(x) for x in (s_target - Gczeros)])*180/np.pi
-    phi_required = (180 + phi_fromG + phi_from_Gc)%360
+    Gczeros = np.array([np.real(s_cancel)]) # place *real* zero
+    phi_from_Gc_zero = sum([cmath.phase(x) for x in (s_target - Gczeros)])*r2d
+    phi_required = (180 + phi_fromG + phi_from_Gc_zero)%360
     
     # now solve the phase condition equation for the comp pole location
-    p = Symbol('p')
-    Gcpoles = solve(atan(s_target.imag/(p + s_target.real)) - phi_required*pi/180,p)
-    Gc = tf((1,-Gczeros[0]), (1,float(Gcpoles[0])))
+    P = s_target.imag/np.tan(phi_required/r2d) - s_target.real
+    Gc = tf((1,-Gczeros[0]), (1,P))
     Gain = -1/np.real(G(s_target) * Gc(s_target))
     Gc *= Gain
-
+    Gc_zeros = Gc.zeros()[0].real
+    Gc_poles = Gc.poles()[0].real
     L = G*Gc    
     Gcl = feedback(L,1)
 
     if verbose:
-        print(f"{phi_fromG*r2d = :4.2f}")
-        print(f"{phi_from_Gc*r2d = :4.2f}")
-        print(f"{phi_required*r2d = :4.2f}")
-        print(f"{Gczeros[0][0] = :4.2f}")
-        print(f"{Gcpoles[0][0] = :4.2f}")
+        print(f"{phi_fromG = :4.2f}")
+        print(f"{phi_required = :4.2f}")
+        print(f"{phi_from_Gc_zero = :4.2f}")
+        print(f"{Gc_zeros = :4.2f}")
+        print(f"{Gc_poles = :4.2f}")
         print(f"{Gain = :4.2f}")
 
     return Gc, Gcl.poles()
