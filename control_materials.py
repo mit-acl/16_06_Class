@@ -186,12 +186,38 @@ def Root_Locus_design_ratio(G, s_target = complex(-1,2), gamma = 10):
  
 ####################################################################
 ####################################################################
+def Root_Locus_design_PD(G, s_target = complex(-1,2),verbose=False):
+    '''
+    RL PD design of Gc by to put CLP at s_target 
+    '''
+    phi_fromG = sum([cmath.phase(x) for x in (s_target - G.zeros())]) - \
+                sum([cmath.phase(x) for x in (s_target - G.poles())])
+    print(f"{phi_fromG*r2d = :4.2f}")
+    phi_required = (np.pi - phi_fromG)%(2*np.pi)
+    print(f"{phi_required*r2d = :4.2f}")
+
+    # now solve the phase condition equation for the comp pole location
+    Z = s_target.imag/np.tan(phi_required) - s_target.real
+    Gc = tf((1,Z),1)
+    Gain = -1/np.real(G(s_target) * Gc(s_target))
+    Gc *= Gain
+    L = G*Gc    
+    Gcl = feedback(L,1)
+
+    if verbose:
+        print(f"Gc Zero {Z = :4.2f}")
+        print(f"{Gain = :4.2f}")
+
+    return Gc, Gcl.poles()
+
+####################################################################
+####################################################################
 class Step_info:
     # init method or constructor
     def __init__(self,t,y, method = 0, t0 = 0, SettlingTimeLimits = [0.02], RiseTimeLimits = [0.1,0.9]):
         self.t = t
         self.y = y
-        self.Yss = y[-1]
+        self.Yss = y[-1] # approx steady state value
         self.SettlingTimeLimits = SettlingTimeLimits
         sgnYss = np.sign(self.Yss.real)
 
@@ -200,12 +226,14 @@ class Step_info:
         self.Tr = self.t[tr_upper_index] - self.t[tr_lower_index]
         self.Tr_values = [self.t[tr_lower_index] - t0,self.t[tr_upper_index] - t0]
 
+        #Find the time that has settled close to the steady state value
         settled = np.where(np.abs(self.y/self.Yss-1) >= SettlingTimeLimits)[0][-1]+1
         if settled < len(self.t):
             self.Ts = self.t[settled] - t0
         else:
             self.Ts = 0.  # avoids weird plot
         
+        # Peak overshoot
         self.Mp = (self.y.max()/self.Yss-1)
         self.Tp = t[int(np.median(np.argwhere(self.y == self.y.max())))] - t0
         if method == 0: # which methods used to estimate zeta and wn from the step results
@@ -214,14 +242,15 @@ class Step_info:
             self.wn = np.pi/self.Tp/np.sqrt(1-self.zeta**2)
         else:
             print("Using Ts")
+            q = self.Tp/np.pi/self.Ts
             if self.SettlingTimeLimits[0] == 0.01:
-                q = 4.6*self.Tp/np.pi/self.Ts # 1% rule
+                q *= 4.6 # 1% rule
             else:
-                q = 4*self.Tp/np.pi/self.Ts # 2 % rule
+                q *= 4 # 2 % rule
             self.zeta = q / np.sqrt( 1 + q**2 )
             self.wn = 4/self.Ts/self.zeta
     
-    def printout(self):
+    def printout(self, raw = False):
         print("omega_n: \t%4.3f"%(self.wn))
         print("zeta   : \t%4.3f"%(self.zeta))
         print("Tr     : \t%4.2fs"%(self.Tr))
@@ -229,15 +258,7 @@ class Step_info:
         print("Mp     : \t%4.2f"%(self.Mp))
         print("Tp     : \t%4.2fs"%(self.Tp))
         print("Yss    : \t%4.2f"%(self.Yss))
-
-        #for k in S:
-        #    if k in ['RiseTime','Overshoot','PeakTime','SettlingTime']:
-        #        try:
-        #            print(f"{k}: {S[k]:3.4}")
-        #        except:
-        #            print(f"{k}: {S[k]:4}")
-
-        
+       
     def nice_plot(self,ax, Tmax = None, Ymax = None):
         if Ymax is None:
             ylim=(np.floor(np.min(self.y)),np.ceil(10.*np.max(self.y))/10.0)
@@ -313,7 +334,7 @@ def find_system_type(L):
 def find_Kp(L):
     L_type = find_system_type(L)
     if L_type == 0:
-        return np.abs(L.num[0][0][-1]/L.den[0][0][-1])
+        return np.real((L.num[0][0][-1]/L.den[0][0][-1]))
     else:
         return None
 
@@ -324,7 +345,7 @@ def find_Kv(L):
     if L_type == 0:
         return 0
     elif L_type == 1:
-        return np.abs(L.num[0][0][-1]/L.den[0][0][-2])
+        return np.real(L.num[0][0][-1]/L.den[0][0][-2])
     else:
         return None
 
@@ -335,7 +356,7 @@ def find_Ka(L):
     if L_type < 2:
         return 0
     elif L_type == 2:
-        return np.abs(L.num[0][0][-1]/L.den[0][0][-3])
+        return np.real(L.num[0][0][-1]/L.den[0][0][-3])
     else:
         return None
 
