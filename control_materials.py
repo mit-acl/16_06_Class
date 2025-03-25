@@ -4,11 +4,12 @@ from sympy import Symbol, atan, pi, tan, sqrt, solve, log, symbols
 from numpy.polynomial import Polynomial
 from numpy import inf
 
+import control as ct
+ct.set_defaults('nyquist',max_curve_magnitude = 100)
 import control
 import control.matlab
 from control.matlab import feedback, tf
 
-import matplotlib
 import matplotlib.pyplot as plt
 
 r2d = 180/np.pi
@@ -574,6 +575,19 @@ def feedback_ff(G, K, Kff):
 
     return tf(Kff*NGDC+NGNC,DGDC+NGNC)
 
+####################################################################
+def writeGc(filename, Gc):
+    '''
+    Write the Gc to a file
+    '''
+    with open(filename, "w") as f:
+        f.write(str(f"{np.real(-Gc.zeros())[0]:4.2f}"))
+    with open(filename, "w") as f:
+        f.write(str(f"{np.real(-Gc.poles())[0]:4.2f}"))
+    with open(filename, "w") as f:
+        gain = Gc.num[0][0][0]/Gc.den[0][0][0]
+        f.write(str(f"{gain:4.2f}"))
+       
 ####################################################################
 if __name__ == "__main__":
     pass
