@@ -11,6 +11,7 @@ import control.matlab
 from control.matlab import feedback, tf
 
 import matplotlib.pyplot as plt
+from scipy.optimize import minimize
 
 r2d = 180/np.pi
 tpi = 2*np.pi
@@ -155,36 +156,56 @@ def Root_Locus_design_cancel(G, s_target = complex(-1,2), s_cancel = -1, verbose
 
 ####################################################################
 ####################################################################
-def Root_Locus_design_ratio(G, s_target = complex(-1,2), gamma = 10):
+def Root_Locus_design_ratio(G, s_target = complex(-1,2), gamma = 10, z0 = None, idx = None, verbose = False):
     '''
     RL Lead design of Gc by to put CLP at s_target using a Gc.p/Gc.z = gamma
     '''
     z = Symbol('z')
-    phi_fromG = sum([cmath.phase(x) for x in (s_target - G.zeros())]) - \
-                sum([cmath.phase(x) for x in (s_target - G.poles())])
-    print(f"{phi_fromG*r2d = :4.2f}")
-    phi_required = (np.pi - phi_fromG)%(2*np.pi)
-    print(f"{phi_required*r2d = :4.2f}")
+    if verbose:
+        phi_fromG = sum([cmath.phase(x) for x in (s_target - G.zeros())]) - \
+                    sum([cmath.phase(x) for x in (s_target - G.poles())])
+        print(f"{phi_fromG*r2d = :4.2f}")
+        phi_required = (np.pi - phi_fromG)%(2*np.pi)
+        print(f"{phi_required*r2d = :4.2f}")
 
-    # now solve the phase condition equation for the comp zero location
-    # this implements the tan(A-B) = (tan(A) - tan(B)/(1+tan(A)tan(B)) condition in the notes 
-    func = (s_target.imag/(z+s_target.real) - s_target.imag/(gamma*z+s_target.real))\
-    /(1+(s_target.imag/(z+s_target.real))*(s_target.imag/(gamma*z+s_target.real)))
-    Gczeros = max(solve(func - tan(phi_required),z))
-    Gcpoles = gamma*Gczeros
-    print(f"{Gczeros = :4.2f}")
-    print(f"{Gcpoles = :4.2f}")
+    def func(z, gam, G, s_0):
+        Gc = tf((1, float(z)), (1, float(gam*z)))  # comp with zero at z and pole at p
+        L = Gc*G
+        phi_fromL = (sum([cmath.phase(x) for x in (s_0 - L.zeros())]) * 180 / np.pi - \
+                    sum([cmath.phase(x) for x in (s_0 - L.poles())]) * 180 / np.pi) % 360
+        return (phi_fromL - 180) % 360    
 
-    Gc = tf((1, float(Gczeros)), (1,float(Gcpoles)))
+    if z0 is None:
+        z0 = np.array([1])
+        
+    resPID = minimize(func, x0=z0, args=(gamma,G,s_target,), tol=1e-3, method='Nelder-Mead', options={'disp': verbose, 'maxiter': 1000})
+    if not resPID.success:
+        print("Optimization failed")
+    else:
+        if verbose:
+            print(f"Optimization success: {resPID.success}")
+            pretty_row_print(resPID.x, "Optimized z: ")
+
+    if idx is None:
+        Gczeros = resPID.x[0]  # real zero location
+    else:
+        Gczeros = resPID.x[idx]
+        
+    Gc = tf((1, float(Gczeros)), (1,float(gamma*Gczeros)))
     Gain = -1/np.real(G(s_target) * Gc(s_target))
     Gc *= Gain
-    print(f"{Gain = :4.2f}")
+
+    if verbose:
+        print(f"Optimized Gc zero location: {Gczeros = :4.2f}")
+        print(f"Optimized Gc pole location: {gamma*Gczeros = :4.2f}")
+        print(f"{Gain = :4.2f}")
 
     L = G*Gc
-    Gcl = feedback(L,1)
+    Gcl = feedback(L)
+    Gcl.poles()
 
     return Gc, Gcl.poles()
- 
+  
 ####################################################################
 ####################################################################
 def Root_Locus_design_PD(G, s_target = complex(-1,2),verbose=False):
@@ -364,15 +385,22 @@ def find_Ka(L):
 ####################################################################
 ####################################################################
 # find frequency of gain crossover
-def find_wc(omega, Gf, mag = 1):
-    return np.interp(mag,np.flipud(np.abs(Gf)),np.flipud(omega))
+def find_wc(omega, G, mag = 1):
+    '''
+    find freq when the system mag = mag 
+    '''
+    Gf = G(1j*omega)  # complex freq response
+    idx = np.argmin(np.abs(mag - np.abs(Gf)))  # find the index where |G(jw)| is closest to mag
+    return omega[idx], idx  # return the frequency and index
 
 # find the gain at phase crossover (-pi)
-def find_wpi(omega, Gf, phi = np.pi):
+def find_wpi(omega, G, phi = np.pi):
     '''
-    find sytem gain when the system phase = pi 
+    find freq when system phase = pi 
     '''
-    return np.interp(phi, np.abs(np.unwrap(np.angle(Gf))), omega)
+    Gf = G(1j*omega)  # complex freq response
+    idx = np.argmin(np.abs(phi - np.angle(Gf) * r2d))
+    return omega[idx], idx
 
 ####################################################################
 ####################################################################
