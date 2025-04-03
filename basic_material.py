@@ -162,13 +162,12 @@ if importlib.util.find_spec('slycot') is None:
 else:
     slycot_available = True
 
-linestyle_str = [
-     ('loosely dotted',        (0, (1, 10))),
-     ('densely dotted',        (0, (1, 1))),
-     ('loosely_dashed',        (0, (5, 10))),
-     ('densely_dashed',        (0, (5, 1))),
-     ('loosely_dashdotted',    (0, (3, 10, 1, 10))),
-     ('densely_dashdotted',    (0, (3, 1, 1, 1)))]
+loosely_dotted = (0, (1, 10))
+densely_dotted = (0, (1, 1))
+loosely_dashed = (0, (5, 10))
+densely_dashed = (0, (5, 1))
+loosely_dashdotted = (0, (3, 10, 1, 10))
+densely_dashdotted = (0, (3, 1, 1, 1))
 
 ####################################################################
 ####################################################################
