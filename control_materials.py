@@ -176,7 +176,7 @@ def Root_Locus_design_ratio(G, s_target = complex(-1,2), gamma = 10, z0 = None, 
         return (phi_fromL - 180) % 360    
 
     if z0 is None:
-        z0 = np.array([1])
+        z0 = -s_target.real/2  # default initial guess for zero location
         
     resPID = minimize(func, x0=z0, args=(gamma,G,s_target,), tol=1e-3, method='Nelder-Mead', options={'disp': verbose, 'maxiter': 1000})
     if not resPID.success:
