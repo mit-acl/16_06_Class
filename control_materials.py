@@ -471,6 +471,14 @@ def near_zero(P, Tol = 1e-12):
 
 ####################################################################
 ####################################################################
+def log_interp(zz, xx, yy):
+    logz = np.log10(zz)
+    logx = np.log10(xx)
+    logy = np.log10(yy)
+    return np.power(10.0, np.interp(logz, logx, logy))
+
+####################################################################
+####################################################################
 from scipy.linalg import solve_continuous_lyapunov, svd
 def balred(G, order = None, DCmatch = False, check = False, Tol = 1e-5):
     """
