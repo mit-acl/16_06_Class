@@ -237,6 +237,14 @@ def Root_Locus_design_PD(G, s_target = complex(-1,2),verbose=False):
 class Step_info:
     # init method or constructor
     def __init__(self,t,y, method = 0, t0 = 0, SettlingTimeLimits = [0.02], RiseTimeLimits = [0.1,0.9]):
+        '''
+        t: time vector
+        y: response vector
+        method: 0 for Tp, 1 for Ts
+        t0: time offset
+        SettlingTimeLimits: settling time limits
+        RiseTimeLimits: rise time limits   
+        '''
         self.t = t
         self.y = y
         self.Yss = y[-1] # approx steady state value
@@ -281,7 +289,7 @@ class Step_info:
         print("Tp     : \t%4.2fs"%(self.Tp))
         print("Yss    : \t%4.2f"%(self.Yss))
        
-    def nice_plot(self,ax, Tmax = None, Ymax = None):
+    def nice_plot(self,ax=None, Tmax = None, Ymax = None):
         if Ymax is None:
             ylim=(np.floor(np.min(self.y)),np.ceil(10.*np.max(self.y))/10.0)
             Ymax = np.max(ylim) # needed for plot scaling
@@ -294,6 +302,8 @@ class Step_info:
         except:
             print(f"Using {self.SettlingTimeLimits = :4.2f}")
             
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(8, 5))
         # the response
         ax.plot(self.t,self.y,'b')
         # vertical lines at Tr, Tp, Ts
@@ -310,6 +320,7 @@ class Step_info:
         ax.text(self.Tp, 0.75*self.Yss, "Tp = {0:.2f}".format(self.Tp), fontsize=SMALL_SIZE)
         ax.text(self.Ts, 0.5*self.Yss, "Ts = {0:.2f}".format(self.Ts), fontsize=SMALL_SIZE)
         ax.text(self.Tp*1.1, self.Yss*(1 + self.Mp), "Mp = {0:.2f}".format(self.Mp), fontsize=SMALL_SIZE)
+        ax.text(Tmax * 0.6, self.Yss * 0.9, rf"$e_{{ss}}$ = {1 - self.Yss:.3f}", fontsize=SMALL_SIZE, color='purple')
         ax.set_xlabel('time [s]')
         ax.set_ylabel('Response')
         ax.set_title('Step Response')
@@ -318,32 +329,66 @@ class Step_info:
 
 ####################################################################
 ####################################################################
-def lead_design(G, wc_des = 1, PM = 45):
+def lead_design(G, wc_des = 1, PM = 45, verbose = False):
     j = complex(0,1)
     Gf = G(j*wc_des)
     phi_G = cmath.phase(Gf)*r2d
     phi_m = (PM - (180 + phi_G))/r2d # robust?
+
     zdp = (1 - np.sin(phi_m))/(1 + np.sin(phi_m))
-    z = wc_des*np.sqrt(zdp)
-    p = z/zdp
+    z = float(wc_des*np.sqrt(zdp))
+    p = float(z/zdp)
+
     Gc_lead = tf([1, z],[1, p]) 
     L = G*Gc_lead
     k_c = 1/np.abs(L(j*wc_des))
     Gc_lead *= k_c
-    return Gc_lead
+
+    if verbose:
+        print(f"Lead {phi_m*r2d = :4.2f}")
+        print(f"zdp = {zdp:4.2f}")
+        print(f"Lead z = {z:4.2f}, p = {p:4.2f}, k_c = {k_c:4.2f}")
+
+    # Generate LaTeX paragraph
+    latex_paragraph = (
+        f"The phase of the open-loop transfer function $G(j\\omega_c)$ at the desired crossover frequency "
+        f"is $\\phi_G = {phi_G:.2f}$ degrees. Thus the required phase lead is calculated as "
+        f"$\\phi_m = {phi_m * r2d:.2f}$ degrees. \n\n Using the phase lead, the zero-to-pole ratio is determined "
+        f"as $z/p = {zdp:.2f}$. \n\n The zero and pole of the lead compensator are then placed at "
+        f"$z = {z:.2f}$ and $p = {p:.2f}$, respectively. \n\n Finally, the compensator gain is adjusted to "
+        f"achieve the desired crossover frequency, resulting in a gain of $k_c = {k_c:.2f}$. \n\n "
+        f"The resulting lead compensator transfer function is $G^{{lead}}_c(s) = {k_c:.2f}\dfrac{{s+{z:.2f}}}{{s+{p:.2f}}}$ "
+    )
+
+    if verbose:
+        return Gc_lead, latex_paragraph
+    else:
+        return Gc_lead
 
 ####################################################################
 ####################################################################
-def lag_design(gain_inc = 10, gamma = 10, wc = 1):
+def lag_design(gain_inc = 10, gamma = 10, wc = 1, verbose = False):
     '''
     gain_inc: goal for adding the lag
     gamma = 10: heuristic design approach
     wc: design goal
     '''
-    zl = wc/gamma 
-    pl = zl/gain_inc
-    Gc_lag = tf([1, zl],[1, pl]) # lag comp
-    return Gc_lag 
+    zl = float(wc/gamma)
+    pl = float(zl/gain_inc)
+    if verbose:
+        print(f"Lag z = {zl:4.2f}, p = {pl:4.2f}")
+        latex_paragraph = (
+            f"The {{\\bf lag compensator}} design process involves selecting a desired gain increase "
+            f"and a design parameter $\\gamma$. For this design, the desired gain increase is "
+            f"$\\text{{gain\_inc}} = {gain_inc:.2f}$ and the design parameter is $\\gamma = {gamma:.2f}$. \n\n"
+            f"The zero of the lag compensator is placed at $z_l = \\dfrac{{\\omega_c}}{{\\gamma}} = {zl:.2f}$, "
+            f"where $\\omega_c = {wc:.2f}$ is the desired crossover frequency. \n\n"
+            f"The pole of the lag compensator is then placed at $p_l = \\dfrac{{z_l}}{{\\text{{gain\_inc}}}} = {pl:.3f}$. \n\n"
+            f"The resulting lag compensator transfer function is $G^{{lag}}_c(s) = \\dfrac{{s+{zl:.2f}}}{{s+{pl:.3f}}}$ "
+        )
+        return tf([1, zl],[1, pl]), latex_paragraph
+    else:
+        return tf([1, zl],[1, pl])
                 
 ####################################################################
 ####################################################################
@@ -393,13 +438,13 @@ def find_wc(omega, G, mag = 1):
     idx = np.argmin(np.abs(mag - np.abs(Gf)))  # find the index where |G(jw)| is closest to mag
     return omega[idx], idx  # return the frequency and index
 
-# find the gain at phase crossover (-pi)
-def find_wpi(omega, G, phi = np.pi):
+# find the gain at phase crossover (pi)
+def find_wpi(omega, G, phi = 180):
     '''
-    find freq when system phase = pi 
+    find freq when system phase = 180
     '''
     Gf = G(1j*omega)  # complex freq response
-    idx = np.argmin(np.abs(phi - np.angle(Gf) * r2d))
+    idx = np.argmin(np.abs(phi - (np.angle(Gf)%360) * r2d))
     return omega[idx], idx
 
 ####################################################################

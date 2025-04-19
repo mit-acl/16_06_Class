@@ -71,8 +71,10 @@ plt.rc('legend', fontsize=SMALL_SIZE)    # legend fontsize
 plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
 
 # where I tend to put data files
-source = "/Users/jonathanhow/Dropbox (MIT)/Classes/16.06/Spr_2025/Source/data/"
-
+try:
+    source = "/Users/jonathanhow/Dropbox (MIT)/Classes/16.06/Spr_2025/Source/data/"
+except:
+    source = "./data/"
 
 ####################################################################
 ####################################################################
@@ -82,11 +84,12 @@ def U(t):
     u[t >= 0] = 1
     return u
 
-
+####################################################################
+####################################################################
 ####################################################################
 ####################################################################
 # makes a nice grid of various line widths/shades
-def nicegrid(ax, hh = -1): # hh < 0 is used to swithc off behavior that is not useful
+def nicegrid(ax, hh = 2): # hh < 0 is used to swithc off behavior that is not useful
     try: #if np.size(ax) > 1
         for ii in np.arange(len(ax)):
             jgrid(ax[ii],hh)
@@ -97,20 +100,20 @@ def nicegrid(ax, hh = -1): # hh < 0 is used to swithc off behavior that is not u
 ####################################################################
 ####################################################################
 # grid helper
-def jgrid(ax,hh = 9):
+def jgrid(ax,hh = 2):
     ax.grid(True, which='major', color='#666666', linestyle=':')
     ax.grid(True, which='minor', color='#999999', linestyle=':', alpha=0.2)
-    try:
-        ax.axhline(y=0, color='k', linestyle='-',lw=1)
-        ax.axvline(x=0, color='k', linestyle='-',lw=1)
-    except:
-        ax.axhline(y=1, color='k', linestyle='--',lw=1)
+    if ax.get_yscale() != 'log':
+        ax.axhline(y = 0, color='k', linestyle='-',lw=1)
+    else:
+        ax.axhline(y = 1, color='k', linestyle='--',lw=1)
+
+    if ax.get_xscale() != 'log':
+        ax.axvline(x = 0, color='k', linestyle='-',lw=1)
+
     ax.minorticks_on()
-    if hh > 0:
-        ax.xaxis.set_major_locator(ticker.LinearLocator(hh))
-    ax.xaxis.set_minor_locator(ticker.AutoMinorLocator(5))
-    ax.yaxis.set_minor_locator(ticker.AutoMinorLocator(5))
-    
+    #ax.xaxis.set_minor_locator(ticker.MultipleLocator(1 / hh))
+    #ax.yaxis.set_minor_locator(ticker.MultipleLocator(1 / hh))
 
 ####################################################################
 ####################################################################
