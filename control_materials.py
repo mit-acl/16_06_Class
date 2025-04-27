@@ -333,6 +333,8 @@ def lead_design(G, wc_des = 1, PM = 45, verbose = False):
     j = complex(0,1)
     Gf = G(j*wc_des)
     phi_G = cmath.phase(Gf)*r2d
+    if phi_G > 0:
+        phi_G = phi_G - 360
     phi_m = (PM - (180 + phi_G))/r2d # robust?
 
     zdp = (1 - np.sin(phi_m))/(1 + np.sin(phi_m))
@@ -352,14 +354,13 @@ def lead_design(G, wc_des = 1, PM = 45, verbose = False):
     # Generate LaTeX paragraph
     latex_paragraph = (
         f"The phase of the open-loop transfer function $G(j\\omega_c)$ at the desired crossover frequency "
-        f"is $\\phi_G = {phi_G:.2f}$ degrees. Thus the required phase lead is calculated as "
-        f"$\\phi_m = {phi_m * r2d:.2f}$ degrees. \n\n Using the phase lead, the zero-to-pole ratio is determined "
-        f"as $z/p = {zdp:.2f}$. \n\n The zero and pole of the lead compensator are then placed at "
-        f"$z = {z:.2f}$ and $p = {p:.2f}$, respectively. \n\n Finally, the compensator gain is adjusted to "
+        f"is $\\phi_G = {phi_G:.2f}^\circ$. Thus the required phase lead is calculated as "
+        f"$\\phi_m = {phi_m * r2d:.2f}^\circ$. Using the phase lead equation $$\dfrac{{z}}{{p}} = \dfrac{{1 - \\sin(\\phi_m)}}{{1 + \\sin(\\phi_m)}} = {zdp:.3f}.$$  The zero and pole of the lead compensator are then placed at "
+        f"$z = {z:.2f}$ and $p = {p:.2f}$, respectively. Finally, the compensator gain is adjusted to "
         f"achieve the desired crossover frequency, resulting in a gain of $k_c = {k_c:.2f}$. \n\n "
         f"The resulting lead compensator transfer function is $G^{{lead}}_c(s) = {k_c:.2f}\dfrac{{s+{z:.2f}}}{{s+{p:.2f}}}$ "
     )
-
+    
     if verbose:
         return Gc_lead, latex_paragraph
     else:
