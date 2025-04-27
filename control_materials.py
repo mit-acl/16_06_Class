@@ -440,12 +440,15 @@ def find_wc(omega, G, mag = 1):
     return omega[idx], idx  # return the frequency and index
 
 # find the gain at phase crossover (pi)
-def find_wpi(omega, G, phi = 180):
+def find_wpi(omega, G, phi = 180, verbose = False):
     '''
     find freq when system phase = 180
     '''
     Gf = G(1j*omega)  # complex freq response
-    idx = np.argmin(np.abs(phi - (np.angle(Gf)%360) * r2d))
+    idx = np.argmin(np.abs(phi - (np.angle(Gf)* r2d)%360 ))
+    if verbose:
+        print(f'wpi = {omega[idx]:.3f} r/s','idx = ',idx)
+        print(f'ang G(jwpi) = {np.angle(G(1j*omega[idx]))*r2d:.3f}')
     return omega[idx], idx
 
 ####################################################################
