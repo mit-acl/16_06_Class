@@ -445,7 +445,7 @@ def find_wpi(omega, G, phi = 180, verbose = False):
     find freq when system phase = 180
     '''
     Gf = G(1j*omega)  # complex freq response
-    idx = np.argmin(np.abs(phi - (np.angle(Gf)* r2d)%360 ))
+    idx = np.argmin(np.abs(phi - (np.angle(Gf)* r2d)))
     if verbose:
         print(f'wpi = {omega[idx]:.3f} r/s','idx = ',idx)
         print(f'ang G(jwpi) = {np.angle(G(1j*omega[idx]))*r2d:.3f}')
