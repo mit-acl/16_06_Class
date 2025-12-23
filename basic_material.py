@@ -15,6 +15,9 @@ import importlib.util
 from pathlib import Path
 
 import numpy as np
+float_formatter = "{:.4f}".format
+np.set_printoptions(formatter={'float': '{: 8.3f}'.format})
+from numpy import logspace, linspace
 
 # -------------------------------
 # Version and environment helpers
@@ -149,6 +152,17 @@ def U(t):
 # Plot helpers
 # -------------------------------
 
+def get_colors():
+    try:
+        import simple_colors
+        return [
+            "Blue", "Red", "Magenta", "Green", "Black",
+            "Brown", "DarkBlue", "Tomato", "Violet",
+            "Tan", "Salmon", "Pink",
+        ]
+    except ImportError:
+        return ['b', 'r', 'm', 'g', 'k']
+        
 def nicegrid(ax, hh=2):
     """
     Apply standard grid styling to one or more axes.
@@ -191,3 +205,90 @@ LOOSELY_DASHED = (0, (5, 10))
 DENSELY_DASHED = (0, (5, 1))
 LOOSELY_DASHDOTTED = (0, (3, 10, 1, 10))
 DENSELY_DASHDOTTED = (0, (3, 1, 1, 1))
+
+# ------------------------------------------------------------------
+# Self-update helper (instructor provided)
+# ------------------------------------------------------------------
+
+def ensure_version(
+    required_version,
+    *,
+    url_base="https://raw.githubusercontent.com/mit-acl/16_06_Class/main/",
+    filename="basic_material.py",
+    verbose=True,
+):
+    """
+    Ensure this module matches the required version.
+
+    If the version is missing or mismatched, attempt to download the
+    correct file and reload the module.
+
+    Parameters
+    ----------
+    required_version : str
+        Expected __version__ string.
+    url_base : str
+        Base URL where the file is hosted.
+    filename : str
+        Local filename of this module.
+    verbose : bool
+        Print status messages.
+    """
+    import sys
+    import time
+    import shutil
+    import requests
+    import importlib
+    from pathlib import Path
+
+    current = globals().get("__version__", None)
+    if current == required_version:
+        if verbose:
+            print(f"basic_material OK (version {current})")
+        return
+
+    if verbose:
+        print(
+            f"basic_material version mismatch "
+            f"(found {current!r}, need {required_version!r}). "
+            "Attempting update..."
+        )
+
+    path = Path(filename)
+    url = url_base + filename
+
+    # download
+    try:
+        r = requests.get(url, timeout=15)
+        r.raise_for_status()
+    except Exception as e:
+        raise RuntimeError(f"Failed to download {url}: {e}")
+
+    # backup existing file
+    if path.exists():
+        bak = path.with_suffix(f".bak.{int(time.time())}")
+        shutil.copy2(path, bak)
+        if verbose:
+            print(f"Backed up existing file to {bak.name}")
+
+    # atomic write
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(r.text)
+    tmp.replace(path)
+
+    # reload module
+    mod = sys.modules.get(__name__)
+    if mod is None:
+        raise RuntimeError("Internal error: module not found in sys.modules")
+
+    importlib.reload(mod)
+
+    new_version = globals().get("__version__", None)
+    if new_version != required_version:
+        raise RuntimeError(
+            f"Update failed: expected version {required_version!r}, "
+            f"found {new_version!r} after reload"
+        )
+
+    if verbose:
+        print(f"basic_material updated successfully to version {new_version}")
