@@ -7,7 +7,7 @@ Students should not modify this file.
 All environment setup is opt in via setup_environment().
 """
 
-__version__ = "16.06-0.1"
+__version__ = "16.06-0.2"
 
 import sys
 import os
