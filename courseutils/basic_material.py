@@ -7,7 +7,7 @@ Students should not modify this file.
 All environment setup is opt in via setup_environment().
 """
 
-__version__ = "16.06-0.2"
+__version__ = "16.06-0.3"
 
 import sys
 import os
@@ -153,16 +153,14 @@ def U(t):
 # -------------------------------
 
 def get_colors():
-    try:
-        import simple_colors
-        return [
-            "Blue", "Red", "Magenta", "Green", "Black",
-            "Brown", "DarkBlue", "Tomato", "Violet",
-            "Tan", "Salmon", "Pink",
-        ]
-    except ImportError:
-        return ['b', 'r', 'm', 'g', 'k']
-        
+    """
+    Return a list of Matplotlib-safe color names.
+    """
+    return [
+        "blue", "red", "darkgreen", "magenta", "black",
+        "salmon", "brown", "darkblue", "tomato", "violet",
+        "tan", "pink"]
+
 def nicegrid(ax, hh=2):
     """
     Apply standard grid styling to one or more axes.
