@@ -78,6 +78,19 @@ def setup_environment(
     if check_packages:
         _check_required_packages()
 
+    try:
+        import slycot
+        SLYCOT_AVAILABLE = True
+    except ImportError:
+        SLYCOT_AVAILABLE = False
+
+    import warnings
+    warnings.filterwarnings(
+        "ignore",
+        message="This figure includes Axes that are not compatible with tight_layout"
+    )
+        
+
 # -------------------------------
 # Plotting style
 # -------------------------------

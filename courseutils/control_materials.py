@@ -5,7 +5,7 @@ Control utilities for 16.06.
 All environment/setup is opt-in via setup_environment().
 """
 
-__version__ = "16.06-0.1"
+__version__ = "16.06-0.2"
 
 from pathlib import Path
 import numpy as np
@@ -13,6 +13,7 @@ import cmath
 from numpy.polynomial import Polynomial
 from numpy import inf
 import matplotlib.pyplot as plt
+import sympy as sp
 
 # control is an optional dependency; checked in setup_environment
 import importlib.util
@@ -556,5 +557,97 @@ def writeGc(filename, Gc):
         f.write("zeros:" + ",".join(f"{z:4.2f}" for z in zs) + "\n")
         f.write("poles:" + ",".join(f"{p:4.2f}" for p in ps) + "\n")
         f.write("gain:" + f"{gain:4.2f}" + "\n")
+
+######################################################   
+# sympy helpers
+######################################################
+
+def round_constants(expr, ndigits=3):
+    return expr.xreplace({
+        c: sp.Float(c, ndigits) for c in expr.atoms()
+        if c.is_Number and not c.is_Integer
+    })
+
+
+######################################################   
+# TF helpers
+######################################################
+from IPython.display import Math
+
+def _num_to_latex(x, sigfigs=4):
+    """
+    Convert a float to LaTeX-safe numeric string.
+    Uses \\times 10^{k} for scientific notation, with clean exponents.
+    """
+    s = f"{x:.{sigfigs}g}"
+    if "e" in s or "E" in s:
+        base, exp = s.replace("E", "e").split("e")
+        exp = int(exp)   # <-- THIS removes leading zeros
+        return rf"{base}\times 10^{{{exp}}}"
+    return s
+
+def _poly_to_latex(coefs, sigfigs=4, var='s'):
+    coefs = np.asarray(coefs, dtype=float)
+    n = len(coefs)
+    terms = []
+
+    for i, c in enumerate(coefs):
+        power = n - 1 - i
+        if abs(c) < 1e-12:
+            continue
+
+        sign = '-' if c < 0 else '+'
+        mag = abs(c)
+        coeff = _num_to_latex(mag, sigfigs)
+
+        is_one = coeff in ("1", "1.0")
+
+        if power == 0:
+            term = coeff
+        elif power == 1:
+            term = var if is_one else f"{coeff} {var}"
+        else:
+            term = f"{var}^{power}" if is_one else f"{coeff} {var}^{power}"
+
+        terms.append((sign, term))
+
+    if not terms:
+        return "0"
+
+    first_sign, first_term = terms[0]
+    out = "-" + first_term if first_sign == '-' else first_term
+    for sign, term in terms[1:]:
+        out += f" {sign} {term}"
+    return out
+
+def show_tf_latex(P, sigfigs=4, str=r"P(s)"):
+    """
+    Robust TransferFunction renderer for notebooks.
+    Returns an IPython.display.Math object (so make this the last expression in the cell).
+    """
+    # 1) Try the library's LaTeX repr (might be None)
+    try:
+        latex = P._repr_latex_()
+    except Exception:
+        latex = None
+
+    if latex:
+        # some implementations return '$$...$$' — Math tolerates either
+        return Math(latex)
+
+    # 2) Fallback: build LaTeX from coefficients
+    try:
+        num = np.array(P.num[0][0], dtype=float)
+        den = np.array(P.den[0][0], dtype=float)
+    except Exception:
+        # if object isn't a TF or has an odd structure, return its text repr
+        return Math(r"\text{ " + str(P).replace("_", r"\_") + " }")
+
+    num_tex = _poly_to_latex(num, sigfigs=sigfigs)
+    den_tex = _poly_to_latex(den, sigfigs=sigfigs)
+    frac = r"\displaystyle \frac{" + num_tex + "}{" + den_tex + "}"
+    # Math will handle wrapping/escaping; return it so the notebook shows only LaTeX
+    return Math(str +" = "+ frac)
+
 
 # module is quiet on import
