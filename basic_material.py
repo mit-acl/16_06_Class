@@ -1,180 +1,193 @@
-from platform import python_version
-print("Running Python:",python_version())
+"""
+basic_material.py
 
-if float(python_version()[2:4]) > 10:
-    new_root_locus_color_string = True
-else:
-    new_root_locus_color_string = False
+Shared utilities for 16.06.
+Students should not modify this file.
 
-import shutil, sys, os.path, math, time, subprocess, random, importlib.util
+All environment setup is opt in via setup_environment().
+"""
+
+__version__ = "16.06-hw1"
+
+import sys
+import os
+import importlib.util
+from pathlib import Path
 
 import numpy as np
-from numpy import logspace, linspace
-float_formatter = "{:.4f}".format
-np.set_printoptions(formatter={'float': '{: 8.3f}'.format})
 
-import matplotlib
-import matplotlib.cm as cm
-from matplotlib.cm import get_cmap
-import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
-from matplotlib.pyplot import figure, savefig
-from matplotlib import gridspec
-from matplotlib import rcParams
-from matplotlib.lines import Line2D
-rcParams["font.serif"] = "cmr14"
-rcParams.update({'font.size': 18})
-plt.rcParams['figure.figsize'] = [8, 5.0]
-plt.rcParams['figure.dpi'] = 150
-plt.rcParams['savefig.dpi'] = 300
-plt.rcParams['lines.linewidth'] = 2
-plt.rcParams['axes.xmargin'] = 0
-plt.rcParams['axes.grid'] = True
-plt.rcParams["figure.autolayout"] = True
+# -------------------------------
+# Version and environment helpers
+# -------------------------------
 
-import sympy as sym
-from sympy import lambdify, oo, Symbol, integrate, Heaviside, plot, Piecewise
-from sympy import exp, plot, sin, cos, printing, init_printing, simplify
-from sympy.testing.pytest import ignore_warnings
-print("Running Sympy:",sym.__version__)
-#init_printing(use_unicode=True)
+PYTHON_VERSION = sys.version_info
+NEW_ROOT_LOCUS_COLOR_STRING = PYTHON_VERSION >= (3, 11)
 
-from scipy import signal
-from scipy.fft import fft, fftfreq, fftshift, ifft
+R2D = 180 / np.pi
+RPS2HZ = 1 / (2 * np.pi)
 
-try:
-    import IPython.display as ipd
-except Exception as e2:
-    print(e2)
-    subprocess.Popen('python3 -m pip install IPython', shell=True)    
-    import IPython.display as ipd
+# -------------------------------
+# Paths
+# -------------------------------
 
-from IPython.display import display, Markdown
-from ipywidgets import interact, interactive, fixed, interact_manual
-import ipywidgets as widgets
+DATA_DIR = Path("./data")
+FIG_DIR = Path("./figs")
 
-import warnings
-warnings.filterwarnings("ignore")
+# -------------------------------
+# Public setup function
+# -------------------------------
 
-r2d = 180/np.pi
-rps2hz = 1/(2*np.pi)
+def setup_environment(
+    *,
+    verbose=True,
+    set_plot_style=True,
+    create_dirs=True,
+    check_packages=True
+):
+    """
+    Perform course standard environment setup.
 
-SMALL_SIZE = 10
-MEDIUM_SIZE = 14
-BIGGER_SIZE = 18
-plt.rc('font', size=SMALL_SIZE)          # controls default text sizes
-plt.rc('axes', titlesize=SMALL_SIZE)     # fontsize of the axes title
-plt.rc('axes', labelsize=SMALL_SIZE)    # fontsize of the x and y labels
-plt.rc('xtick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
-plt.rc('ytick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
-plt.rc('legend', fontsize=SMALL_SIZE)    # legend fontsize
-plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
+    Parameters
+    ----------
+    verbose : bool
+        Print Python and SymPy versions.
+    set_plot_style : bool
+        Apply course matplotlib style.
+    create_dirs : bool
+        Create ./data and ./figs if missing.
+    check_packages : bool
+        Check that required packages are installed.
+    """
 
-# where I tend to put data files
-try:
-    source = "/Users/jonathanhow/Dropbox (MIT)/Classes/16.06/Spr_2025/Source/data/"
-except:
-    source = "./data/"
+    if verbose:
+        from platform import python_version
+        import sympy as sym
+        print("Running Python:", python_version())
+        print("Running SymPy:", sym.__version__)
 
-####################################################################
-####################################################################
-# my step function that can be used in plotting
+    if set_plot_style:
+        _set_plot_style()
+
+    if create_dirs:
+        DATA_DIR.mkdir(exist_ok=True)
+        FIG_DIR.mkdir(exist_ok=True)
+
+    if check_packages:
+        _check_required_packages()
+
+# -------------------------------
+# Plotting style
+# -------------------------------
+
+def _set_plot_style():
+    import matplotlib.pyplot as plt
+    from matplotlib import rcParams
+
+    rcParams["font.serif"] = "cmr14"
+    rcParams.update({"font.size": 18})
+
+    plt.rcParams["figure.figsize"] = [8, 5.0]
+    plt.rcParams["figure.dpi"] = 150
+    plt.rcParams["savefig.dpi"] = 300
+    plt.rcParams["lines.linewidth"] = 2
+    plt.rcParams["axes.xmargin"] = 0
+    plt.rcParams["axes.grid"] = True
+    plt.rcParams["figure.autolayout"] = True
+
+    SMALL = 10
+    MEDIUM = 14
+    BIG = 18
+
+    plt.rc("font", size=SMALL)
+    plt.rc("axes", titlesize=SMALL)
+    plt.rc("axes", labelsize=SMALL)
+    plt.rc("xtick", labelsize=SMALL)
+    plt.rc("ytick", labelsize=SMALL)
+    plt.rc("legend", fontsize=SMALL)
+    plt.rc("figure", titlesize=BIG)
+
+# -------------------------------
+# Package checks
+# -------------------------------
+
+def _require_package(name):
+    if importlib.util.find_spec(name) is None:
+        raise ImportError(
+            f"Required package '{name}' not found. "
+            "Please install it following the course instructions."
+        )
+
+def _check_required_packages():
+    _require_package("matplotlib")
+    _require_package("numpy")
+    _require_package("scipy")
+    _require_package("sympy")
+    _require_package("control")
+
+# -------------------------------
+# Numeric helpers
+# -------------------------------
+
 def U(t):
-    u = np.zeros.like(t)
+    """
+    Unit step function.
+
+    Parameters
+    ----------
+    t : array_like
+
+    Returns
+    -------
+    ndarray
+    """
+    t = np.asarray(t)
+    u = np.zeros_like(t)
     u[t >= 0] = 1
     return u
 
-####################################################################
-####################################################################
-####################################################################
-####################################################################
-# makes a nice grid of various line widths/shades
-def nicegrid(ax, hh = 2): # hh < 0 is used to swithc off behavior that is not useful
-    try: #if np.size(ax) > 1
-        for ii in np.arange(len(ax)):
-            jgrid(ax[ii],hh)
-    except:
-        jgrid(ax,hh)
-            
+# -------------------------------
+# Plot helpers
+# -------------------------------
 
-####################################################################
-####################################################################
-# grid helper
-def jgrid(ax,hh = 2):
-    ax.grid(True, which='major', color='#666666', linestyle=':')
-    ax.grid(True, which='minor', color='#999999', linestyle=':', alpha=0.2)
-    if ax.get_yscale() != 'log':
-        ax.axhline(y = 0, color='k', linestyle='-',lw=1)
+def nicegrid(ax, hh=2):
+    """
+    Apply standard grid styling to one or more axes.
+    """
+    try:
+        for a in ax:
+            _jgrid(a, hh)
+    except TypeError:
+        _jgrid(ax, hh)
+
+def _jgrid(ax, hh=2):
+    import matplotlib.ticker as ticker
+
+    ax.grid(True, which="major", color="#666666", linestyle=":")
+    ax.grid(True, which="minor", color="#999999", linestyle=":", alpha=0.2)
+
+    if ax.get_yscale() != "log":
+        ax.axhline(y=0, color="k", linestyle="-", lw=1)
     else:
-        ax.axhline(y = 1, color='k', linestyle='--',lw=1)
+        ax.axhline(y=1, color="k", linestyle="--", lw=1)
 
-    if ax.get_xscale() != 'log':
-        ax.axvline(x = 0, color='k', linestyle='-',lw=1)
+    if ax.get_xscale() != "log":
+        ax.axvline(x=0, color="k", linestyle="-", lw=1)
 
     ax.minorticks_on()
-    #ax.xaxis.set_minor_locator(ticker.MultipleLocator(1 / hh))
-    #ax.yaxis.set_minor_locator(ticker.MultipleLocator(1 / hh))
 
-####################################################################
-####################################################################
-# caption below figure, sometimes useful
-def caption(txt,fig, xloc=0.5, yloc=-0.05):
-    fig.text(xloc, yloc, txt, ha='center',size=MEDIUM_SIZE,color='blue')
+def caption(txt, fig, xloc=0.5, yloc=-0.05):
+    """
+    Add a caption below a figure.
+    """
+    fig.text(xloc, yloc, txt, ha="center", size=14, color="blue")
 
+# -------------------------------
+# Line style presets
+# -------------------------------
 
-####################################################################
-####################################################################
-if not os.path.isdir("./data/"):
-    os.mkdir("./data")
-
-if not os.path.isdir("./figs/"):
-    os.mkdir("./figs")
-
-
-####################################################################
-####################################################################
-try:
-    import google.colab
-    IN_COLAB = True
-except:
-    IN_COLAB = False
-
-
-####################################################################
-####################################################################
-try: 
-    from simple_colors import *
-    colors = ['b','r','m','g','k','Brown','DarkBlue','Tomato','Violet', 'Tan','Salmon','Pink',
-    'SaddleBrown', 'SpringGreen', 'RosyBrown','Silver',]
-except:
-    colors = ['b','r','m','g','k']
-
-
-####################################################################
-####################################################################
-if importlib.util.find_spec('control') is None:
-    print("Installing Control Package")
-    os.system(f'python -m pip install control')
-else:
-    print("Control Package Found")
-
-if importlib.util.find_spec('slycot') is None:
-    slycot_available = False
-    # uncomment to install slycot package
-    #os.system(f'pip install slycot')
-else:
-    slycot_available = True
-
-loosely_dotted = (0, (1, 10))
-densely_dotted = (0, (1, 1))
-loosely_dashed = (0, (5, 10))
-densely_dashed = (0, (5, 1))
-loosely_dashdotted = (0, (3, 10, 1, 10))
-densely_dashdotted = (0, (3, 1, 1, 1))
-
-####################################################################
-####################################################################
-if __name__ == "__main__":
-    pass
-else:
-    print("This is a library of basic functions for 16.06")
+LOOSELY_DOTTED = (0, (1, 10))
+DENSELY_DOTTED = (0, (1, 1))
+LOOSELY_DASHED = (0, (5, 10))
+DENSELY_DASHED = (0, (5, 1))
+LOOSELY_DASHDOTTED = (0, (3, 10, 1, 10))
+DENSELY_DASHDOTTED = (0, (3, 1, 1, 1))
