@@ -5,7 +5,7 @@ Control utilities for 16.06.
 All environment/setup is opt-in via setup_environment().
 """
 
-__version__ = "16.06-0.2"
+__version__ = "16.06-0.4"
 
 from pathlib import Path
 import numpy as np
@@ -14,12 +14,16 @@ from numpy.polynomial import Polynomial
 from numpy import inf
 import matplotlib.pyplot as plt
 import sympy as sp
-
+import control as ct
 # control is an optional dependency; checked in setup_environment
 import importlib.util
+from dataclasses import dataclass
+from typing import List
+from IPython.display import Math
 
 # constants
 r2d = 180.0 / np.pi
+R2D = 180.0 / np.pi
 tpi = 2 * np.pi
 
 SMALL_SIZE = 10
@@ -61,7 +65,7 @@ def setup_environment(*, verbose=False):
     # matplotlib style consistent with basic_material
     from matplotlib import rcParams
     rcParams["font.serif"] = "cmr14"
-    rcParams.update({"font.size": 18})
+    rcParams.update({"font.size": 10})
     plt.rcParams["figure.figsize"] = [8, 5.0]
     plt.rcParams["figure.dpi"] = 150
     plt.rcParams["savefig.dpi"] = 300
@@ -81,17 +85,33 @@ def setup_environment(*, verbose=False):
 # Utility functions
 # -------------------------------
 
-def Root_Locus_gains(L, Krange=None, Tol=1e-3, standard_locus=True, Tol_max=1e3):
+def Root_Locus_gains(L, Krange=None, Tol=1e-3, standard_locus=True, Tol_max=1e3, verbose = False):
     """
     Augment RL gains to include break-in/break-out points; returns augmented Krange.
     """
+    # Basic checks
+    if not isinstance(L, ct.TransferFunction):
+        raise TypeError("Root_Locus_gains expects a control.TransferFunction (SISO).")
+
     if Krange is None:
         Krange = (2 * standard_locus - 1) * np.logspace(-3, 3, num=2000)
     Krange = np.sort(np.append(Krange, 0))  # add zero
 
+    break_info = []   # ← declare once, at top of function
+    
+    @dataclass
+    class BreakPoint:
+        K: float
+        poles: List[float]
+
     try:
-        Num = L.num[0][0]
-        Den = L.den[0][0]
+        Num = np.asarray(L.num[0][0], dtype=float)
+        Den = np.asarray(L.den[0][0], dtype=float)
+        npoles = len(L.den[0][0])
+        nzeros = len(L.num[0][0])
+        n_add = int(npoles - nzeros)
+        L_num_add = np.pad(L.num[0][0], (n_add, 0), "constant", constant_values=(0,))
+
         dNds = np.polyder(Num) if len(Num) > 1 else np.array([0.0])
         dDds = np.polyder(Den) if len(Den) > 1 else np.array([0.0])
 
@@ -112,25 +132,33 @@ def Root_Locus_gains(L, Krange=None, Tol=1e-3, standard_locus=True, Tol_max=1e3)
 
         if len(Kkeep) > 0:
             Krange = np.sort(np.append(Krange, Kkeep))
-            npoles = len(L.den[0][0])
-            nzeros = len(L.num[0][0])
-            n_add = int(npoles - nzeros)
-            L_num_add = np.pad(L.num[0][0], (n_add, 0), "constant", constant_values=(0,))
+            # find the location of the break in/out pts -- given by duplicate real poles
             for kk in Kkeep:
                 phi_temp = L.den[0][0] + kk * L_num_add
                 scl = np.roots(phi_temp)
-                real_poles = [np.round(x.real, 3) for x in scl if abs(x.imag) < Tol]
-                double_real_poles = set([x for x in real_poles if real_poles.count(x) > 1])
-                # Preserve informative prints only when debugging; function is quiet by default
-                # print("\nFound breakin/out at K = {:4.3f}".format(kk))
-                # print("At possible locations s = " + ', '.join('{:4.3f}'.format(x.real) for x in double_real_poles))
-        else:
-            double_real_poles = []
-    except Exception:
-        # fail silently and return the original Krange
-        return Krange
+                real_poles = [x.real for x in scl if abs(x.imag) < Tol]
+                double_real_poles = set([x for x in real_poles if real_poles.count(x) > 1]) # the ones we are looking for
+                if double_real_poles:
+                    break_info.append(
+                        BreakPoint(
+                            K = float(kk),
+                            poles = [float(p) for p in double_real_poles]
+                        )
+                    )
+                    if not verbose:
+                        print(f"\nFound break-in/out at K = {kk:6.3f}")
+                        print("At possible locations s = "
+                            + ", ".join(f"{p:6.3f}" for p in double_real_poles))
 
-    return Krange
+    except Exception as e:
+        print("failed to find Krange:", e)
+
+    Krange = [float(k) for k in Krange]
+
+    if verbose:
+        return Krange, break_info
+    else:
+        return Krange
 
 def RL_COM(L, standard_locus=True):
     """
@@ -148,27 +176,30 @@ def RL_COM(L, standard_locus=True):
     Ang = (180.0 / (npoles - nzeros)) % 360.0 if standard_locus else (360.0 / (npoles - nzeros)) % 360.0
     return CoM, Ang
 
-def Root_Locus_design_cancel(G, s_target=complex(-1, 2), s_cancel=-1, verbose=False):
+def Root_Locus_design_cancel(G, s_target=complex(-1, 2), s_cancel=-1, verbose=True):
     """
     Root locus lead design by cancelling/placing pole at s_cancel to get CL poles at s_target.
     Returns (Gc, Gcl_poles).
     """
-    import control as ct
-    from control.matlab import tf, feedback
-
     phi_fromG = sum([cmath.phase(x) for x in (s_target - G.zeros())]) * r2d - \
                 sum([cmath.phase(x) for x in (s_target - G.poles())]) * r2d
+
+    #phi_fromG = phase_at_freq(G,s_target)
 
     Gczeros = np.array([np.real(s_cancel)])
     phi_from_Gc_zero = sum([cmath.phase(x) for x in (s_target - Gczeros)]) * r2d
     phi_required = (180 + phi_fromG + phi_from_Gc_zero) % 360
 
+    if verbose:
+        print(f"Phase from G {phi_fromG:4.2f}")
+        print(f"Phase from Gc zero {phi_from_Gc_zero:4.2f}")
+        print(f"Phase required {phi_required:4.2f}")
+
     P = s_target.imag / np.tan(phi_required / r2d) - s_target.real
-    Gc = tf((1, -Gczeros[0]), (1, P))
+    Gc = ct.tf((1, -Gczeros[0]), (1, P))
     Gain = -1.0 / np.real(G(s_target) * Gc(s_target))
     Gc *= Gain
-    L = G * Gc
-    Gcl = feedback(L, 1)
+    Gcl = ct.feedback(G * Gc, 1)
 
     return Gc, Gcl.poles()
 
@@ -297,7 +328,7 @@ class Step_info:
         ax.text(self.Tp, 0.75 * self.Yss, f"Tp = {self.Tp:.2f}", fontsize=SMALL_SIZE)
         ax.text(self.Ts, 0.5 * self.Yss, f"Ts = {self.Ts:.2f}", fontsize=SMALL_SIZE)
         ax.text(self.Tp * 1.1, self.Yss * (1 + self.Mp), f"Mp = {self.Mp:.2f}", fontsize=SMALL_SIZE)
-        ax.text(Tmax * 0.6, self.Yss * 0.9, rf"$e_{{ss}}$ = {1 - self.Yss:.3f}", fontsize=SMALL_SIZE, color="purple")
+        ax.text(self.Ts, self.Yss * 1.1, rf"$e_{{ss}}$ = {1 - self.Yss:.3f}", fontsize=SMALL_SIZE, color="purple")
         ax.set_xlabel("time [s]")
         ax.set_ylabel("Response")
         ax.set_title("Step Response")
@@ -345,7 +376,6 @@ def lead_design(G, wc_des=1, PM=45, verbose=False):
         return Gc_lead
 
 def lag_design(gain_inc=10, gamma=10, wc=1, verbose=False):
-    from control.matlab import tf
 
     zl = float(wc / gamma)
     pl = float(zl / gain_inc)
@@ -354,60 +384,105 @@ def lag_design(gain_inc=10, gamma=10, wc=1, verbose=False):
             f"The lag compensator zero at $z_l = {zl:.2f}$ and pole at $p_l = {pl:.3f}$. "
             f"Resulting lag compensator $G^{{lag}}_c(s) = \\dfrac{{s+{zl:.2f}}}{{s+{pl:.3f}}}$"
         )
-        return tf([1, zl], [1, pl]), latex_paragraph
+        return ct.tf([1, zl], [1, pl]), latex_paragraph
     else:
-        return tf([1, zl], [1, pl])
+        return ct.tf([1, zl], [1, pl])
 
-def find_system_type(L):
-    return len(L.den[0][0]) - len(np.trim_zeros(L.den[0][0], "b"))
+import numpy as np
+
+def system_type(L, tol=1e-9):
+    """
+    Number of poles at the origin.
+    """
+    poles = L.poles()
+    return sum(abs(p) < tol for p in poles)
+
+def static_error_constant(L, order):
+    """
+    Compute Kp (order=0), Kv (order=1), Ka (order=2).
+    Returns None if not defined.
+    """
+    stype = system_type(L)
+
+    if order < stype:
+        return 0.0
+    if order > stype:
+        return None
+
+    s = 1e-6
+    val = (s**order) * L(s)
+    return float(np.real(val))
 
 def find_Kp(L):
-    L_type = find_system_type(L)
-    if L_type == 0:
-        return float(np.real(L.num[0][0][-1] / L.den[0][0][-1]))
-    return None
+    return static_error_constant(L, order = 0)
 
 def find_Kv(L):
-    L_type = find_system_type(L)
-    if L_type == 0:
-        return 0.0
-    if L_type == 1:
-        return float(np.real(L.num[0][0][-1] / L.den[0][0][-2]))
-    return None
+    return static_error_constant(L, order = 1)
 
 def find_Ka(L):
-    L_type = find_system_type(L)
-    if L_type < 2:
-        return 0.0
-    if L_type == 2:
-        return float(np.real(L.num[0][0][-1] / L.den[0][0][-3]))
-    return None
+    return static_error_constant(L, order = 2)
 
-def find_wc(omega, G, mag=1.0):
-    Gf = G(1j * omega)
-    idx = np.argmin(np.abs(mag - np.abs(Gf)))
+def find_wc(omega, G, mag = 1.0):
+    '''Find freq for which |G| is closest to mag (default 1)'''
+    if isinstance(G, ct.TransferFunction) or isinstance(G, ct.StateSpace):
+        Gf = G(1j*omega) 
+    elif callable(G):
+        Gf = G(1j*omega)
+    elif len(G) > 1:
+        Gf = np.asarray(G, dtype=np.complex128)
+    else:
+        raise TypeError("G must be a TransferFunction, callable, or array of complex values")
+
+    mag_err = np.abs(np.abs(Gf) - mag)
+    idx = np.argmin(mag_err)
     return omega[idx], idx
 
 def find_wpi(omega, G, phi=180, verbose=False):
+    '''Find freq for which arg(G) = phi (assumes degrees)'''
     Gf = G(1j * omega)
-    idx = np.argmin(np.abs(phi - (np.angle(Gf) * r2d)))
+    phase = np.angle(Gf, deg=True)
+
+    # wrap phase difference correctly
+    phase_err = np.abs((phase - phi + 180) % 360 - 180)
+    idx = np.argmin(phase_err)
+
     if verbose:
-        print(f"wpi = {omega[idx]:.3f} r/s idx = {idx}")
-        print(f"ang G(jwpi) = {np.angle(G(1j * omega[idx])) * r2d:.3f}")
+        print(f"wpi = {omega[idx]:.3f} rad/s, idx = {idx}")
+        print(f"phase at wpi = {phase[idx]:.3f} deg")
+
     return omega[idx], idx
 
 def pshift(Gp):
     Gp = np.asarray(Gp)
-    while (np.max(Gp) < -np.pi):
+
+    Gpmax = np.pi
+    if np.max(np.abs(Gp)) > 2*np.pi + 1e-3: # likely in degrees
+        Gpmax = 180        
+
+    while (np.max(Gp) < -Gpmax):
         Gp += 2 * np.pi
-    while (np.min(Gp) > np.pi):
+    while (np.min(Gp) > Gpmax):
         Gp -= 2 * np.pi
+
     return Gp
 
-def caption(txt, fig, xloc=0.5, yloc=-0.05):
+def phase_at_freq(G,s0):
+    '''For given G(s) and complex frequency s0, return phase of G(s0) in degrees'''
+    phi_fromG = sum([cmath.phase(x) for x in (s0 - G.zeros())])*r2d - \
+                sum([cmath.phase(x) for x in (s0 - G.poles())])*r2d
+    return phi_fromG % 360
+
+def caption(txt, fig=None, xloc=0.5, yloc=-0.05):
+    """
+    Add a centered caption to a figure (below the axes).
+    If fig is None, uses the current figure.
+    """
+    if fig is None:
+        fig = plt.gcf()
     fig.text(xloc, yloc, txt, ha="center", size=MEDIUM_SIZE, color="blue")
 
-def my_pzmap(G, ax=None):
+def new_pzmap(G, ax=None):
+    '''PZ map with nicer markers for the poles/zeros'''
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 5))
     ax.plot(np.real(G.poles()), np.imag(G.poles()), "bx", ms=6)
@@ -438,6 +513,24 @@ def color_rl(ax):
 
 def Read_data(file_name, comments=["#", "F"], cols=[0]):
     return np.loadtxt(file_name, comments=comments, delimiter=",", usecols=cols)
+
+def add_break_info(ax, break_info, dim = None):
+    ymin, ymax = ax.get_ylim()
+    ydelta = (ymax - ymin)/10.0
+    xmin, xmax = ax.get_xlim()
+    xdelta = xmin + 0.05*(xmax - xmin)   # 5% from left
+    if dim is None:
+        dim = float(ymax)
+
+    if break_info:
+        for k, bp in enumerate(break_info):
+            poles_str = ", ".join(f"{p:5.3f}" for p in bp.poles)
+            ax.text(
+                xdelta,
+                dim - (k + 1) * ydelta,
+                f"Gain: {bp.K:5.3f} at s = {poles_str}",
+                fontsize=8
+            )
 
 def near_zero(P, Tol=1e-12):
     P.num[0][0] = [x if abs(x) > Tol else 0.0 for x in P.num[0][0]]
@@ -586,68 +679,131 @@ def _num_to_latex(x, sigfigs=4):
         return rf"{base}\times 10^{{{exp}}}"
     return s
 
-def _poly_to_latex(coefs, sigfigs=4, var='s'):
-    coefs = np.asarray(coefs, dtype=float)
-    n = len(coefs)
-    terms = []
 
-    for i, c in enumerate(coefs):
-        power = n - 1 - i
-        if abs(c) < 1e-12:
+def _poly_to_latex(coefs, sigfigs=4, var="s", discrete=False):
+    """
+    Convert a polynomial coefficient vector into a LaTeX string with proper signs,
+    and suppress the leading '1' for readability when appropriate.
+    """
+    terms = []
+    n = len(coefs)
+
+    for i, val in enumerate(coefs):
+        v = round(val, sigfigs)
+        if abs(v) < 1e-12:
             continue
 
-        sign = '-' if c < 0 else '+'
-        mag = abs(c)
-        coeff = _num_to_latex(mag, sigfigs)
+        # determine sign
+        sign = "-" if v < 0 else "+"
+        mag = abs(v)
 
-        is_one = coeff in ("1", "1.0")
-
-        if power == 0:
-            term = coeff
-        elif power == 1:
-            term = var if is_one else f"{coeff} {var}"
+        if discrete:
+            power = i
+            if power == 0:
+                term_body = f"{mag:g}"
+            else:
+                # omit '1' if mag==1
+                coeff_str = "" if mag == 1 else f"{mag:g}"
+                term_body = rf"{coeff_str}{var}^{{-{power}}}"
         else:
-            term = f"{var}^{power}" if is_one else f"{coeff} {var}^{power}"
+            degree = n - 1 - i
+            if degree > 1:
+                coeff_str = "" if mag == 1 else f"{mag:g}"
+                term_body = rf"{coeff_str}{var}^{degree}"
+            elif degree == 1:
+                coeff_str = "" if mag == 1 else f"{mag:g}"
+                term_body = rf"{coeff_str}{var}"
+            else:
+                term_body = f"{mag:g}"
 
-        terms.append((sign, term))
+        terms.append((sign, term_body))
 
     if not terms:
         return "0"
 
+    # first term: no leading '+' if positive
     first_sign, first_term = terms[0]
-    out = "-" + first_term if first_sign == '-' else first_term
+    result = ("" if first_sign == "+" else "-") + first_term
+
+    # append others
     for sign, term in terms[1:]:
-        out += f" {sign} {term}"
-    return out
+        result += f" {sign} {term}"
 
-def show_tf_latex(P, sigfigs=4, str=r"P(s)"):
+    return result
+
+def tf_to_latex(G):
+    s = sp.Symbol('s')
+    
+    # Get numerator and denominator coefficients
+    num, den = G.num[0][0], G.den[0][0]
+
+    # Convert to symbolic expressions
+    num_poly = sum(np.round(coef,2) * s**i for i, coef in enumerate(reversed(num)))
+    den_poly = sum(np.round(coef,2) * s**i for i, coef in enumerate(reversed(den)))
+
+    # Create the LaTeX representation
+    G_sym = num_poly / den_poly
+    raw_latex = sp.latex(G_sym)
+    nice_latex = raw_latex.replace(r"\frac", r"\dfrac")     # force displaystyle fractions
+    return nice_latex
+
+def show_tf_latex(P, label=None, sigfigs=4):
     """
-    Robust TransferFunction renderer for notebooks.
-    Returns an IPython.display.Math object (so make this the last expression in the cell).
+    Display a TransferFunction as LaTeX with correct s/z variable
+    and z^-1 formatting for discrete systems.
     """
-    # 1) Try the library's LaTeX repr (might be None)
+    # detect discrete vs continuous
     try:
-        latex = P._repr_latex_()
+        is_discrete = ct.isdtime(P)
     except Exception:
-        latex = None
+        dt = getattr(P, "dt", None)
+        is_discrete = isinstance(dt, (int, float)) and dt > 0
 
-    if latex:
-        # some implementations return '$$...$$' — Math tolerates either
-        return Math(latex)
+    # pick variable and formatting mode
+    var = "z" if is_discrete else "s"
+    discrete_mode = is_discrete
 
-    # 2) Fallback: build LaTeX from coefficients
+    # build label
+    if label is None:
+        label = rf"G({var})"
+    else:
+        label = rf"{label}({var})"
+
+    # try built-in LaTeX from control
+    try:
+        built_in = P._repr_latex_()
+    except Exception:
+        built_in = None
+
+    if built_in:
+        body = built_in.strip("$")
+        return Math(label + " = " + body)
+
+    # fallback: use coefficient vectors
     try:
         num = np.array(P.num[0][0], dtype=float)
         den = np.array(P.den[0][0], dtype=float)
     except Exception:
-        # if object isn't a TF or has an odd structure, return its text repr
-        return Math(r"\text{ " + str(P).replace("_", r"\_") + " }")
+        text = str(P).replace("_", r"\_")
+        return Math(r"\text{" + text + "}")
 
-    num_tex = _poly_to_latex(num, sigfigs=sigfigs)
-    den_tex = _poly_to_latex(den, sigfigs=sigfigs)
+    # build LaTeX from polynomials
+    num_tex = _poly_to_latex(num, sigfigs=sigfigs, var=var, discrete=discrete_mode)
+    den_tex = _poly_to_latex(den, sigfigs=sigfigs, var=var, discrete=discrete_mode)
+
     frac = r"\displaystyle \frac{" + num_tex + "}{" + den_tex + "}"
-    # Math will handle wrapping/escaping; return it so the notebook shows only LaTeX
-    return Math(str +" = "+ frac)
+    return Math(label + " = " + frac)
 
+def pid(Kp = 0, Ki = 0, Kd = 0):
+    s = ct.tf((1,0),(1))
+    return ct.tf(Kp,1) + Ki/s + Kd*s
+
+def nyquist(*args, **kwargs):
+    """
+    Wrapper around control.nyquist_plot that always suppresses title
+    unless explicitly overridden.
+    """
+    kwargs.setdefault("title", "")
+    return ct.nyquist_plot(*args, **kwargs)
 
 # module is quiet on import
