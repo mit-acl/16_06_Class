@@ -62,6 +62,19 @@ def setup_environment(*, verbose=False):
         # not fatal; just a best-effort setting
         pass
 
+    # stop annoying warnings
+    import warnings
+    warnings.filterwarnings(
+        "ignore",
+        message="divide by zero encountered in divide"
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message="invalid value encountered in divide"
+    )
+    import logging
+    logging.getLogger("matplotlib").setLevel(logging.ERROR)
+
     # matplotlib style consistent with basic_material
     from matplotlib import rcParams
     rcParams["font.serif"] = "cmr14"
