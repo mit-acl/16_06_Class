@@ -7,7 +7,7 @@ Students should not modify this file.
 All environment setup is opt in via setup_environment().
 """
 
-__version__ = "16.06-0.3"
+__version__ = "16.06-0.4"
 
 import sys
 import os
@@ -25,6 +25,7 @@ from numpy import logspace, linspace
 
 PYTHON_VERSION = sys.version_info
 NEW_ROOT_LOCUS_COLOR_STRING = PYTHON_VERSION >= (3, 11)
+SLYCOT_AVAILABLE = False
 
 R2D = 180 / np.pi
 RPS2HZ = 1 / (2 * np.pi)
@@ -82,14 +83,14 @@ def setup_environment(
         import slycot
         SLYCOT_AVAILABLE = True
     except ImportError:
-        SLYCOT_AVAILABLE = False
+        pass
 
     import warnings
     warnings.filterwarnings(
         "ignore",
         message="This figure includes Axes that are not compatible with tight_layout"
     )
-        
+
 
 # -------------------------------
 # Plotting style

@@ -16,10 +16,12 @@ import matplotlib.pyplot as plt
 import sympy as sp
 import control as ct
 # control is an optional dependency; checked in setup_environment
+import control.matlab as cmat
 import importlib.util
 from dataclasses import dataclass
 from typing import List
 from IPython.display import Math
+import scipy.linalg
 
 # constants
 r2d = 180.0 / np.pi
@@ -98,7 +100,7 @@ def setup_environment(*, verbose=False):
 # Utility functions
 # -------------------------------
 
-def Root_Locus_gains(L, Krange=None, Tol=1e-3, standard_locus=True, Tol_max=1e3, verbose = False):
+def Root_Locus_gains(L, Krange=None, Tol=1e-5, standard_locus=True, Tol_max=1e3, verbose = False, debug=None):
     """
     Augment RL gains to include break-in/break-out points; returns augmented Krange.
     """
@@ -136,32 +138,53 @@ def Root_Locus_gains(L, Krange=None, Tol=1e-3, standard_locus=True, Tol_max=1e3,
         part2 = np.pad(part2, (max_len - len(part2), 0), "constant")
 
         pdr = np.roots(part1 - part2)  # candidate points where dL/ds poles occur
+        if debug is not None:
+            print("Possible locations: ",pdr)
 
-        Kkeep = [-1.0 / np.real(L(x)) for x in pdr if abs(x.imag) < Tol]
+        Kkeep = [-1.0 / np.real(L(x)) for x in pdr if (abs(x.imag) < Tol and np.abs(np.real(L(x))) > Tol)]
         if standard_locus:
             Kkeep = [x for x in Kkeep if (x >= 0) and (x < Tol_max)]
         else:
             Kkeep = [x for x in Kkeep if (x <= 0) and (x > -Tol_max)]
 
+        if debug is not None:
+            print("Associated gains", Kkeep)        
+
+        # find the location of the break in/out pts -- given by duplicate real poles
         if len(Kkeep) > 0:
-            Krange = np.sort(np.append(Krange, Kkeep))
-            # find the location of the break in/out pts -- given by duplicate real poles
-            for kk in Kkeep:
+            for kk in np.array(Kkeep):
                 phi_temp = L.den[0][0] + kk * L_num_add
-                scl = np.roots(phi_temp)
-                real_poles = [x.real for x in scl if abs(x.imag) < Tol]
-                double_real_poles = set([x for x in real_poles if real_poles.count(x) > 1]) # the ones we are looking for
-                if double_real_poles:
+                scl = np.roots(phi_temp) # clp poles for that gain
+
+                real_poles = [x.real for x in scl if abs(x.imag) < Tol] # which clp are real 
+                if debug is not None:
+                    print(f"For gain {kk:5.3f} poles at ",real_poles)
+
+                # which real are double?
+                double_real_poles = [x for x in real_poles if np.sum(np.isclose(real_poles, x, atol=Tol)) > 1] 
+
+                if len(double_real_poles) > 0:
+                    if debug is not None:
+                        print("Double Real gain, pole location? ",kk,double_real_poles[0])
                     break_info.append(
                         BreakPoint(
                             K = float(kk),
-                            poles = [float(p) for p in double_real_poles]
+                            poles = [float(p) for p in double_real_poles[::2]]
                         )
                     )
                     if not verbose:
                         print(f"\nFound break-in/out at K = {kk:6.3f}")
                         print("At possible locations s = "
                             + ", ".join(f"{p:6.3f}" for p in double_real_poles))
+
+                    Krange = np.sort(np.append(Krange, kk)) # add gains associated with double real poles
+
+                else:
+                    if debug is not None:
+                        print("Not Double? ",kk,double_real_poles)
+                    else:
+                        pass
+
 
     except Exception as e:
         print("failed to find Krange:", e)
@@ -494,16 +517,19 @@ def caption(txt, fig=None, xloc=0.5, yloc=-0.05):
         fig = plt.gcf()
     fig.text(xloc, yloc, txt, ha="center", size=MEDIUM_SIZE, color="blue")
 
-def new_pzmap(G, ax=None):
+def new_pzmap(G, ax=None, title = None):
     '''PZ map with nicer markers for the poles/zeros'''
     if ax is None:
-        fig, ax = plt.subplots(figsize=(8, 5))
+        fig, ax = plt.subplots(figsize=(5, 5))
     ax.plot(np.real(G.poles()), np.imag(G.poles()), "bx", ms=6)
     ax.plot(np.real(G.zeros()), np.imag(G.zeros()), "o", ms=6, markeredgewidth=2,
             markeredgecolor="r", markerfacecolor="r")
     ax.set_xlabel("Real")
     ax.set_ylabel("Imaginary")
-    ax.set_title("Pole-Zero Map")
+    if title is None:
+        ax.set_title("Pole-Zero Map")
+    else:
+        ax.set_title(title)
     ax.grid(True)
     return ax
 
@@ -527,23 +553,37 @@ def color_rl(ax):
 def Read_data(file_name, comments=["#", "F"], cols=[0]):
     return np.loadtxt(file_name, comments=comments, delimiter=",", usecols=cols)
 
-def add_break_info(ax, break_info, dim = None):
+def add_break_info(ax, break_info, dim=None, tol=1e-6):
     ymin, ymax = ax.get_ylim()
-    ydelta = (ymax - ymin)/10.0
+    ydelta = (ymax - ymin) / 10.0
     xmin, xmax = ax.get_xlim()
-    xdelta = xmin + 0.05*(xmax - xmin)   # 5% from left
+    xdelta = xmin + 0.05 * (xmax - xmin)
+
     if dim is None:
         dim = float(ymax)
 
-    if break_info:
-        for k, bp in enumerate(break_info):
-            poles_str = ", ".join(f"{p:5.3f}" for p in bp.poles)
-            ax.text(
-                xdelta,
-                dim - (k + 1) * ydelta,
-                f"Gain: {bp.K:5.3f} at s = {poles_str}",
-                fontsize=8
-            )
+    if not break_info:
+        return
+
+    for k, bp in enumerate(break_info):
+
+        poles = np.atleast_1d(bp.poles).astype(float)
+
+        # Deduplicate with tolerance
+        unique_poles = []
+        for p in poles:
+            if not any(abs(p - q) <= tol for q in unique_poles):
+                unique_poles.append(p)
+
+        # Only display the first unique pole
+        pole_str = f"{unique_poles[0]:5.3f}"
+
+        ax.text(
+            xdelta,
+            dim - (k + 1) * ydelta,
+            f"Gain: {bp.K:5.3f} at s = {pole_str}",
+            fontsize=8
+        )
 
 def near_zero(P, Tol=1e-12):
     P.num[0][0] = [x if abs(x) > Tol else 0.0 for x in P.num[0][0]]
@@ -559,34 +599,73 @@ def log_interp(zz, xx, yy):
 
 # balanced truncation
 from scipy.linalg import solve_continuous_lyapunov, svd
-def balred(G, order=None, DCmatch=False, check=False, Tol=1e-5):
-    import control
-    # convert to TF if state-space provided
-    if not isinstance(G, control.StateSpace):
-        convert_to_TF = True
-        Gin = G
-    else:
-        convert_to_TF = False
-        Gin = control.ss2tf(G)
+def balred(G, order = None, DCmatch = False, check = False, method = None, Tol=1e-9):
+    '''
+    Balanced Model reduction using both methods discussed here
+    https://web.stanford.edu/group/frg/course_work/CME345/CA-AA216-CME345-Ch6.pdf
 
-    G_trimmed = control.tf(Gin.num[0][0], np.trim_zeros(Gin.den[0][0], "b"))
+    G: System model in TF or SS form
+
+    Free integrators will be removed for reduction and then added back in
+
+    order: dim of system to return
+    '''
+    is_ss = isinstance(G, ct.StateSpace) # in SS form already?
+    if is_ss:
+        Gin = ct.ss2tf(G)
+    else:
+        Gin = G
+
+    if method is None:
+        method = 0
+
+    G_trimmed = ct.tf(Gin.num[0][0], np.trim_zeros(Gin.den[0][0], "b"))
     number_cut = len(Gin.den[0][0]) - len(G_trimmed.den[0][0])
 
-    Gss = control.tf2ss(G_trimmed)
+    Gss = ct.tf2ss(G_trimmed)
     if order is None:
         order = Gss.A.shape[0] - 1
     order -= number_cut
+    if order <= 0:
+        print("System dimension not correct")
+        return
+
+    # check stability
+    evals = scipy.linalg.eigvals(Gss.A)
+    if np.max(np.real(evals)) > 0:
+        print("Algorithm only works for stable systems")
+        return
 
     Wc = solve_continuous_lyapunov(Gss.A, -Gss.B @ Gss.B.T)
     Wo = solve_continuous_lyapunov(Gss.A.T, -Gss.C.T @ Gss.C)
-
+    Wc = (Wc + Wc.T)/2.0
+    Wo = (Wo + Wo.T)/2.0
     U = np.linalg.cholesky(Wc)
-    Z = np.linalg.cholesky(Wo)
-    W, S, Vh = svd(U.T @ Z)
-    S_sqrt_inv = np.linalg.inv(np.diag((np.sqrt(S))))
 
-    T = S_sqrt_inv @ Vh @ Z.T
-    Ti = U @ W @ S_sqrt_inv
+    if method == 0:
+        print("Using Method 0")
+        Z = np.linalg.cholesky(Wo)
+        W, Sigma, Vh = svd(U.T @ Z)
+        Sigma_sqrt_inv = np.linalg.inv(np.diag(np.sqrt(Sigma)))
+
+        T = Sigma_sqrt_inv @ Vh @ Z.T
+        Ti = U @ W @ Sigma_sqrt_inv
+
+    elif method == 1:
+        print("Using Method 1 - not recommended for high-order systems")
+        from scipy.linalg import eigh # symmetric matrices
+
+        eigvals, K = eigh(U.T @ Wo @ U)
+        idx = eigvals.argsort()[::-1]
+        eigvals = eigvals[idx]
+        K = K[:, idx]
+
+        Sigma = np.sqrt(eigvals)
+        Sigma_inv_sqrt = np.diag([1.0/xx for xx in np.sqrt(Sigma)])
+        Sigma_sqrt = np.diag([xx for xx in np.sqrt(Sigma)])
+
+        T  = Sigma_sqrt @ K.T @ np.linalg.inv(U)
+        Ti = U @ K @ Sigma_inv_sqrt
 
     Ab = T @ Gss.A @ Ti
     Bb = T @ Gss.B
@@ -598,9 +677,9 @@ def balred(G, order=None, DCmatch=False, check=False, Tol=1e-5):
     Drr = Gss.D
     Gr = None
     try:
-        Gr = control.matlab.StateSpace(Arr, Brr, Crr, Drr)
+        Gr = cmat.StateSpace(Arr, Brr, Crr, Drr)
     except Exception:
-        Gr = control.StateSpace(Arr, Brr, Crr, Drr)
+        Gr = ct.StateSpace(Arr, Brr, Crr, Drr)
 
     if DCmatch:
         try:
@@ -618,8 +697,30 @@ def balred(G, order=None, DCmatch=False, check=False, Tol=1e-5):
         except Exception:
             pass
 
-    Gr = near_zero(control.ss2tf(Gr)) * control.tf([1], [1, 0]) ** number_cut
-    return Gr if convert_to_TF else control.tf2ss(Gr)
+    def hsv(Wc,Wo):
+        from scipy.linalg import sqrtm, svd
+        sqrtWc = sqrtm(Wc)
+        U, S, Vh = svd(sqrtWc @ Wo @ sqrtWc)
+        return np.sqrt(S)           
+
+    if check:
+        Wc_bal = solve_continuous_lyapunov(Gr.A, -Gr.B @ Gr.B.T)
+        Wo_bal = solve_continuous_lyapunov(Gr.A.T, -Gr.C.T @ Gr.C)
+        print("\n Balanced")
+        print(Wc_bal)
+        print(Wo_bal)
+        diff = np.linalg.norm(Wc_bal - Wo_bal)
+        if np.abs(diff) < Tol:
+            print("Model is balanced\n")
+        print("\nTransformed Wc")
+        print(T @ Wc @ T.T)
+        print("\nTransformed Wo")
+        print(np.linalg.inv(T.T) @Wo @ Ti)
+        print("\nOriginal model HSV: ",hsv(Wc,Wo))
+
+
+    Gr = near_zero(ct.ss2tf(Gr)) * ct.tf([1], [1, 0]) ** number_cut
+    return ct.tf2ss(Gr) if is_ss else Gr 
 
 def pretty_row_print(X, msg=""):
     print(msg + ", ".join("({0.real:.2f} + {0.imag:.2f}i)".format(x) if np.iscomplex(x) else "{:.3f}".format(x.real) for x in X))
