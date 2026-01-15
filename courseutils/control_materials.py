@@ -7,25 +7,25 @@ All environment/setup is opt-in via setup_environment().
 
 __version__ = "16.06-0.4"
 
-from pathlib import Path
 import numpy as np
 import cmath
-from numpy.polynomial import Polynomial
-from numpy import inf
+
 import matplotlib.pyplot as plt
 import sympy as sp
 import control as ct
-# control is an optional dependency; checked in setup_environment
 import control.matlab as cmat
+
 import importlib.util
 from dataclasses import dataclass
 from typing import List
 from IPython.display import Math
 import scipy.linalg
+import re
+
+from types import SimpleNamespace
 
 # constants
 r2d = 180.0 / np.pi
-R2D = 180.0 / np.pi
 tpi = 2 * np.pi
 
 SMALL_SIZE = 10
@@ -138,8 +138,8 @@ def Root_Locus_gains(L, Krange=None, Tol=1e-5, standard_locus=True, Tol_max=1e3,
         part2 = np.pad(part2, (max_len - len(part2), 0), "constant")
 
         pdr = np.roots(part1 - part2)  # candidate points where dL/ds poles occur
-        if debug is not None:
-            print("Possible locations: ",pdr)
+        if debug:
+            pretty_row_print(pdr,"All possible locations: ")
 
         Kkeep = [-1.0 / np.real(L(x)) for x in pdr if (abs(x.imag) < Tol and np.abs(np.real(L(x))) > Tol)]
         if standard_locus:
@@ -147,29 +147,36 @@ def Root_Locus_gains(L, Krange=None, Tol=1e-5, standard_locus=True, Tol_max=1e3,
         else:
             Kkeep = [x for x in Kkeep if (x <= 0) and (x > -Tol_max)]
 
-        if debug is not None:
-            print("Associated gains", Kkeep)        
+        if debug:
+            pretty_row_print(Kkeep, "Associated gains ")        
+
+        def is_real_pole(p, atol=Tol * 1e-3, rtol=Tol):
+            return abs(p.imag) <= atol + rtol * abs(p.real)
 
         # find the location of the break in/out pts -- given by duplicate real poles
         if len(Kkeep) > 0:
             for kk in np.array(Kkeep):
                 phi_temp = L.den[0][0] + kk * L_num_add
-                scl = np.roots(phi_temp) # clp poles for that gain
 
-                real_poles = [x.real for x in scl if abs(x.imag) < Tol] # which clp are real 
-                if debug is not None:
-                    print(f"For gain {kk:5.3f} poles at ",real_poles)
+                scl = np.roots(phi_temp) # clp poles for that gain
+                if debug:
+                    print(f"For gain {kk:5.3f} poles at ",scl)
+                    print("Are the poles real? ", is_real_pole(scl,rtol=Tol))
+
+                real_poles = np.real(scl[is_real_pole(scl)])
+                if debug:
+                    pretty_row_print(real_poles, "Real poles found")
 
                 # which real are double?
-                double_real_poles = [x for x in real_poles if np.sum(np.isclose(real_poles, x, atol=Tol)) > 1] 
+                double_real_poles = find_double_real_poles(real_poles, tol=Tol)
 
                 if len(double_real_poles) > 0:
-                    if debug is not None:
-                        print("Double Real gain, pole location? ",kk,double_real_poles[0])
+                    if debug:
+                        print("Double Real gain, pole location? ",kk,double_real_poles,np.diff(real_poles))
                     break_info.append(
                         BreakPoint(
                             K = float(kk),
-                            poles = [float(p) for p in double_real_poles[::2]]
+                            poles = [float(p) for p in double_real_poles]
                         )
                     )
                     if not verbose:
@@ -180,8 +187,8 @@ def Root_Locus_gains(L, Krange=None, Tol=1e-5, standard_locus=True, Tol_max=1e3,
                     Krange = np.sort(np.append(Krange, kk)) # add gains associated with double real poles
 
                 else:
-                    if debug is not None:
-                        print("Not Double? ",kk,double_real_poles)
+                    if debug:
+                        print("Not Double? {kk:5.2f}",real_poles,double_real_poles,np.diff(real_poles))
                     else:
                         pass
 
@@ -212,15 +219,16 @@ def RL_COM(L, standard_locus=True):
     Ang = (180.0 / (npoles - nzeros)) % 360.0 if standard_locus else (360.0 / (npoles - nzeros)) % 360.0
     return CoM, Ang
 
+def wrap_phase_neg(phi):
+    return ((phi % 360) - 360) if phi % 360 != 0 else 0
+
 def Root_Locus_design_cancel(G, s_target=complex(-1, 2), s_cancel=-1, verbose=True):
     """
     Root locus lead design by cancelling/placing pole at s_cancel to get CL poles at s_target.
-    Returns (Gc, Gcl_poles).
+    Returns Gc, Gcl_poles()
     """
-    phi_fromG = sum([cmath.phase(x) for x in (s_target - G.zeros())]) * r2d - \
-                sum([cmath.phase(x) for x in (s_target - G.poles())]) * r2d
 
-    #phi_fromG = phase_at_freq(G,s_target)
+    phi_fromG = phase_at_freq(G,s_target)
 
     Gczeros = np.array([np.real(s_cancel)])
     phi_from_Gc_zero = sum([cmath.phase(x) for x in (s_target - Gczeros)]) * r2d
@@ -233,41 +241,66 @@ def Root_Locus_design_cancel(G, s_target=complex(-1, 2), s_cancel=-1, verbose=Tr
 
     P = s_target.imag / np.tan(phi_required / r2d) - s_target.real
     Gc = ct.tf((1, -Gczeros[0]), (1, P))
-    Gain = -1.0 / np.real(G(s_target) * Gc(s_target))
+    Gain = 1.0 / np.abs(G(s_target) * Gc(s_target))
     Gc *= Gain
-    Gcl = ct.feedback(G * Gc, 1)
+    Gcl = ct.feedback(G * Gc)
 
-    return Gc, Gcl.poles()
+    if verbose:
+        return Gc, Gcl.poles(), SimpleNamespace(**{
+        "phi_from_G": phi_fromG,
+        "phi_from_Gc": phi_from_Gc_zero,
+        "phi_required": phi_required,
+    })
+    else:
+        return Gc, Gcl.poles()
+
+def phase_at_freq(G,s0,modulation = None):
+    '''For given G(s) and complex frequency s0, return phase of G(s0) in degrees'''
+    phi_fromG = np.rad2deg(
+        np.sum(np.angle(s0 - G.zeros())) -
+        np.sum(np.angle(s0 - G.poles()))
+    )
+
+    if modulation == False:
+        return phi_fromG 
+    else:
+        return phi_fromG % 360
 
 def Root_Locus_design_ratio(G, s_target=complex(-1, 2), gamma=10, z0=None, idx=None, verbose=False):
     """
     Root locus design using zero/pole ratio gamma.
-    Returns (Gc, Gcl_poles).
+    Returns Gc, Gcl_poles()
     """
-    import control as ct
-    from control.matlab import tf, feedback
     from scipy.optimize import minimize
 
-    def func(z, gam, G, s_0):
-        Gc = tf((1, float(z)), (1, float(gam * z)))
+    def func(theta, gam, G, s_0):
+        z = np.exp(theta)
+        Gc = ct.tf((1, float(z)), (1, float(gam * z)))
         L = Gc * G
-        phi_fromL = (sum([cmath.phase(x) for x in (s_0 - L.zeros())]) * r2d -
-                     sum([cmath.phase(x) for x in (s_0 - L.poles())]) * r2d) % 360
-        return (phi_fromL - 180) % 360
+        phi_fromL = phase_at_freq(L,s_0)
+        phase_err = wrap(phi_fromL - 180, period = 360)
+        return phase_err**2
 
     if z0 is None:
         z0 = -s_target.real / 2
 
-    res = minimize(func, x0=z0, args=(gamma, G, s_target), tol=1e-3, method="Nelder-Mead",
+    res = minimize(func, x0=np.log(z0), args=(gamma, G, s_target), tol=1e-3, method="Nelder-Mead",
                    options={"disp": verbose, "maxiter": 1000})
     if not res.success:
         raise RuntimeError("Optimization failed")
-    Gczeros = res.x[idx] if idx is not None else res.x[0]
-    Gc = tf((1, float(Gczeros)), (1, float(gamma * Gczeros)))
-    Gain = -1.0 / np.real(G(s_target) * Gc(s_target))
+    Gczeros = np.exp(res.x[0])
+
+    # without gain
+    Gc = ct.tf((1, float(Gczeros)), (1, float(gamma * Gczeros)))
+    Gain = 1.0 / np.abs(G(s_target) * Gc(s_target))
+
+    # apply gain
     Gc *= Gain
     L = G * Gc
-    Gcl = feedback(L, 1)
+
+    #close loop
+    Gcl = ct.feedback(L)
+
     return Gc, Gcl.poles()
 
 def Root_Locus_design_PD(G, s_target=complex(-1, 2), verbose=False):
@@ -275,56 +308,181 @@ def Root_Locus_design_PD(G, s_target=complex(-1, 2), verbose=False):
     PD design to place CL poles at s_target.
     Returns (Gc, Gcl_poles).
     """
-    from control.matlab import tf, feedback
-
-    phi_fromG = sum([cmath.phase(x) for x in (s_target - G.zeros())]) - \
-                sum([cmath.phase(x) for x in (s_target - G.poles())])
+    phi_fromG = phase_at_freq(g,s_target)
     phi_required = (np.pi - phi_fromG) % (2 * np.pi)
 
     Z = s_target.imag / np.tan(phi_required) - s_target.real
-    Gc = tf((1, Z), 1)
+
+    # without gain
+    Gc = ct.tf((1, Z), 1)
     Gain = -1.0 / np.real(G(s_target) * Gc(s_target))
+
+    # apply gain
     Gc *= Gain
     L = G * Gc
-    Gcl = feedback(L, 1)
-    return Gc, Gcl.poles()
+    Gcl = ct.feedback(L)
+
+    if verbose:
+        return Gc, Gcl.poles(), SimpleNamespace(**{
+        "phi_from_G": phi_fromG,
+        "phi_required": phi_required,
+        })
+    else:
+        return Gc, Gcl.poles()
+
+
 
 # -------------------------------
 # Step info class (keeps API but safer)
 # -------------------------------
 
+def max_overshoot(t, y, yss=None):
+    """
+    Compute maximum overshoot Mp and peak time Tp from step response.
+
+    Returns
+    -------
+    Mp : float
+        Maximum overshoot as a fraction (e.g. 0.15 for 15%)
+    Tp : float
+        Peak time (time at maximum overshoot)
+    """
+    t = np.asarray(t)
+    y = np.asarray(y)
+
+    if yss is None:
+        yss = y[-1]
+
+    if yss == 0:
+        return np.nan, np.nan
+
+    # work in the direction of the step
+    sgn = np.sign(yss)
+    y_adj = sgn * y
+    yss_adj = abs(yss)
+
+    # peak relative to steady state
+    idx_peak = np.argmax(y_adj)
+    ymax = y_adj[idx_peak]
+
+    Mp = (ymax - yss_adj) / yss_adj
+    Mp = max(0.0, Mp)   # clip if no overshoot
+
+    Tp = t[idx_peak] if Mp > 0 else np.nan
+
+    return Mp, Tp
+
+def settling_time(t, y, tol=0.02, t0=0):
+    """
+    Compute 2% settling time.
+    Returns np.nan if never settles.
+    """
+    y = np.asarray(y)
+    t = np.asarray(t)
+    yss = y[-1]
+    if yss == 0:
+        return np.nan
+    band = tol * abs(yss)
+    err = np.abs(y - yss)
+    outside = np.where(err > band)[0]     # indices where response is OUTSIDE the band
+    if len(outside) == 0:
+        return t[0]   # already settled
+    last_outside = outside[-1]
+    if last_outside == len(t) - 1:
+        return np.nan  # never settles within simulation time
+    return t[last_outside + 1]
+
+import numpy as np
+
+def rise_time(t, y, yss=None, limits=(0.1, 0.9), t0=0.0):
+    """
+    Robust rise time computation using linear interpolation.
+
+    Parameters
+    ----------
+    t : array_like
+        Time vector
+    y : array_like
+        Response vector
+    yss : float or None
+        Steady-state value (default: y[-1])
+    limits : tuple
+        Fractional rise limits, e.g. (0.1, 0.9)
+    t0 : float
+        Time offset to subtract (default: 0)
+
+    Returns
+    -------
+    Tr : float
+        Rise time (NaN if undefined)
+    (t_lo, t_hi) : tuple
+        Times at lower and upper crossings
+    """
+    t = np.asarray(t)
+    y = np.asarray(y)
+
+    if yss is None:
+        yss = y[-1]
+
+    if yss == 0:
+        return np.nan, (np.nan, np.nan)
+
+    sgn = np.sign(yss)
+    y_adj = sgn * y
+    yss_adj = abs(yss)
+
+    y_lo = limits[0] * yss_adj
+    y_hi = limits[1] * yss_adj
+
+    # Find first crossing indices
+    def crossing_time(level):
+        idx = np.where(y_adj >= level)[0]
+        if len(idx) == 0 or idx[0] == 0:
+            return np.nan
+        i = idx[0]
+        # linear interpolation
+        t1, t2 = t[i-1], t[i]
+        y1, y2 = y_adj[i-1], y_adj[i]
+        return t1 + (level - y1) * (t2 - t1) / (y2 - y1)
+
+    t_lo = crossing_time(y_lo)
+    t_hi = crossing_time(y_hi)
+
+    if np.isnan(t_lo) or np.isnan(t_hi):
+        return np.nan, (t_lo, t_hi)
+
+    Tr = t_hi - t_lo
+    return Tr, (t_lo - t0, t_hi - t0)
+
 class Step_info:
     def __init__(self, t, y, method=0, t0=0, SettlingTimeLimits=None, RiseTimeLimits=(0.1, 0.9)):
         self.t = np.asarray(t)
         self.y = np.asarray(y)
-        self.Yss = self.y[-1]
+        self.Yss = self.y[-1] # assumes Tf is large enough that this is true
+
         if SettlingTimeLimits is None:
-            SettlingTimeLimits = [0.02]
-        self.SettlingTimeLimits = SettlingTimeLimits
+            self.SettlingTimeLimits = [0.02]
+        elif np.isscalar(SettlingTimeLimits):
+            self.SettlingTimeLimits = [SettlingTimeLimits]
+        else:
+            self.SettlingTimeLimits = list(SettlingTimeLimits)        
+
         self.RiseTimeLimits = RiseTimeLimits
         sgnYss = np.sign(self.Yss.real) if np.isreal(self.Yss) else np.sign(self.Yss)
 
-        tr_lower_index = np.where(sgnYss * (self.y - RiseTimeLimits[0] * self.Yss) >= 0)[0][0]
-        tr_upper_index = np.where(sgnYss * (self.y - RiseTimeLimits[1] * self.Yss) >= 0)[0][0]
-        self.Tr = self.t[tr_upper_index] - self.t[tr_lower_index]
-        self.Tr_values = [self.t[tr_lower_index] - t0, self.t[tr_upper_index] - t0]
+        self.Tr, self.Tr_values = rise_time(self.t, self.y, yss=self.Yss, limits=RiseTimeLimits, t0=t0)
+        self.Ts = settling_time(self.t, self.y, tol=self.SettlingTimeLimits[0], t0=t0) 
+        self.Mp, self.Tp = max_overshoot(self.t, self.y, self.Yss)
 
-        settled = np.where(np.abs(self.y / self.Yss - 1) >= SettlingTimeLimits[0])[0]
-        self.Ts = (self.t[settled[-1]] - t0) if settled.size > 0 and (settled[-1] + 1) < len(self.t) else 0.0
-
-        self.Mp = (np.max(self.y) / self.Yss - 1)
-        max_idx = int(np.argmax(self.y))
-        self.Tp = float(self.t[max_idx]) - t0
-
-        if method == 0:
-            # using Tp
+        # different assumptions can be used here to estimate these response parameters
+        if method == 0:             # using Tp
             if self.Mp <= 0:
                 self.zeta = np.nan
                 self.wn = np.nan
             else:
                 self.zeta = 1.0 / np.sqrt(1.0 + (np.pi / np.log(self.Mp)) ** 2)
                 self.wn = np.pi / self.Tp / np.sqrt(1.0 - self.zeta ** 2)
-        else:
+        else: # using Ts
             q = self.Tp / np.pi / self.Ts if self.Ts != 0 else np.nan
             if self.SettlingTimeLimits[0] == 0.01:
                 q *= 4.6
@@ -333,7 +491,7 @@ class Step_info:
             self.zeta = q / np.sqrt(1.0 + q ** 2) if not np.isnan(q) else np.nan
             self.wn = 4.0 / self.Ts / self.zeta if self.zeta != 0 else np.nan
 
-    def printout(self, raw=False):
+    def printout(self, verbose=False):
         print(f"omega_n:\t{self.wn:.3f}")
         print(f"zeta   :\t{self.zeta:.3f}")
         print(f"Tr     :\t{self.Tr:.2f}s")
@@ -341,8 +499,18 @@ class Step_info:
         print(f"Mp     :\t{self.Mp:.2f}")
         print(f"Tp     :\t{self.Tp:.2f}s")
         print(f"Yss    :\t{self.Yss:.2f}")
+        if verbose:
+            return SimpleNamespace(**{
+            "Mp": self.Mp,
+            "Tr": self.Tr,
+            "Ts": self.Ts,
+            "Tp": self.Tp,
+            "Yss": self.Yss,
+            })
+        else:
+            pass
 
-    def nice_plot(self, ax=None, Tmax=None, Ymax=None):
+    def nice_plot(self, ax=None, Tmax=None, Ymax=None, label=None, lc='b'):
         if Ymax is None:
             ylim = (np.floor(np.min(self.y)), np.ceil(10.0 * np.max(self.y)) / 10.0)
             Ymax = np.max(ylim)
@@ -352,54 +520,57 @@ class Step_info:
         if ax is None:
             fig, ax = plt.subplots(figsize=(8, 5))
 
-        ax.plot(self.t, self.y, "b")
-        ax.axvline(x=self.Tr_values[0], ymax=0.1 * self.Yss / Ymax, c="r", ls="dashed")
-        ax.axvline(x=self.Tr_values[1], ymax=0.9 * self.Yss / Ymax, c="r", ls="dashed")
-        ax.axvline(x=self.Ts, ymax=self.Yss / Ymax, c="grey", ls="dashed")
-        ax.axvline(ymax=self.Yss * (1 + self.Mp) / Ymax, x=self.Tp, c="m", ls="dashed", lw=2)
-        ax.axhline(y=(1 + self.SettlingTimeLimits[0]) * self.Yss, xmin=self.Ts / Tmax, c="grey", ls="dashed", lw=1)
-        ax.axhline(y=(1 - self.SettlingTimeLimits[0]) * self.Yss, xmin=self.Ts / Tmax, c="grey", ls="dashed", lw=1)
-        ax.plot((0, self.Tp), (self.Yss * (1 + self.Mp), self.Yss * (1 + self.Mp)), c="green", ls="dashed", lw=2)
-        ax.text(self.Tr / 2, 0.25 * self.Yss, f"Tr = {self.Tr:.2f}", fontsize=SMALL_SIZE)
-        ax.text(self.Tp, 0.75 * self.Yss, f"Tp = {self.Tp:.2f}", fontsize=SMALL_SIZE)
-        ax.text(self.Ts, 0.5 * self.Yss, f"Ts = {self.Ts:.2f}", fontsize=SMALL_SIZE)
-        ax.text(self.Tp * 1.1, self.Yss * (1 + self.Mp), f"Mp = {self.Mp:.2f}", fontsize=SMALL_SIZE)
-        ax.text(self.Ts, self.Yss * 1.1, rf"$e_{{ss}}$ = {1 - self.Yss:.3f}", fontsize=SMALL_SIZE, color="purple")
+        ax.plot(self.t, self.y, color=lc, label=label)
         ax.set_xlabel("time [s]")
         ax.set_ylabel("Response")
         ax.set_title("Step Response")
         ax.set_ylim(0, Ymax)
         ax.set_xlim(0, Tmax)
 
+        ax.axvline(x=self.Tr_values[0], ymax=0.1 * self.Yss / Ymax, c="r", ls="dashed")
+        ax.axvline(x=self.Tr_values[1], ymax=0.9 * self.Yss / Ymax, c="r", ls="dashed")
+        ax.axvline(x=self.Ts, ymax=self.Yss / Ymax, c="grey", ls="dashed")
+        ax.axvline(ymax=min((self.Yss * (1 + self.Mp)) / Ymax, 1.0), x=self.Tp, c="m", ls="dashed", lw=2)
+        ax.axhline(y=(1 + self.SettlingTimeLimits[0]) * self.Yss, xmin=self.Ts / Tmax, c="grey", ls="dashed", lw=1)
+        ax.axhline(y=(1 - self.SettlingTimeLimits[0]) * self.Yss, xmin=self.Ts / Tmax, c="grey", ls="dashed", lw=1)
+        ax.plot((0, self.Tp), (self.Yss * (1 + self.Mp), self.Yss * (1 + self.Mp)), c="green", ls="dashed", lw=2)
+        ax.text(min(self.Tr / 2, Tmax/2), 0.25 * self.Yss, f"Tr = {self.Tr:.2f}", fontsize=SMALL_SIZE)
+        ax.text(min(self.Tp, Tmax/2), 0.75 * self.Yss, f"Tp = {self.Tp:.2f}", fontsize=SMALL_SIZE)
+        ax.text(min(self.Ts, Tmax/2), 0.5 * self.Yss, f"Ts = {self.Ts:.2f}", fontsize=SMALL_SIZE)
+        ax.text(min(self.Tp * 1.1, Tmax/2), min(self.Yss * (1 + self.Mp),0.8*Ymax), f"Mp = {self.Mp:.2f}", fontsize=SMALL_SIZE)
+        ax.text(min(self.Ts, Tmax/2), min(self.Yss * 1.1,0.9*Ymax), rf"$e_{{ss}}$ = {1 - self.Yss:.3f}", fontsize=SMALL_SIZE, color="purple")
+
 # -------------------------------
 # More utilities
 # -------------------------------
 
-def lead_design(G, wc_des=1, PM=45, verbose=False):
-    import cmath
-    from control.matlab import tf
+def wrap(phase, period = 360 ) :
+    return (phase + period//2) % (period) - period//2
 
-    j = complex(0, 1)
-    Gf = G(j * wc_des)
-    phi_G = cmath.phase(Gf) * r2d
-    if phi_G > 0:
-        phi_G -= 360
-    phi_m = (PM - (180 + phi_G)) / r2d
+def lead_design(G, wc_des = 1, PMdes = 45, verbose=None):
 
-    zdp = (1.0 - np.sin(phi_m)) / (1.0 + np.sin(phi_m))
+    Gf = G(complex(0, 1) * wc_des)
+    phi_G = wrap_phase_neg(np.angle(Gf)) * r2d # phase of plant at wc (degs)
+    PM = wrap(180.0 + phi_G)
+
+    if verbose:
+        print(f"Plant phase {phi_G:.2f}° , PMdes {PMdes:.2f}°, Current PM {PM:.2f}°, Phase required {PMdes - PM:.2f}°")
+
+    phi_required = (PMdes - PM) / r2d  # rads
+    zdp = (1.0 - np.sin(phi_required)) / (1.0 + np.sin(phi_required))
     z = float(wc_des * np.sqrt(zdp))
     p = float(z / zdp)
 
-    Gc_lead = tf([1, z], [1, p])
+    Gc_lead = ct.tf([1, z], [1, p])
     L = G * Gc_lead
-    k_c = 1.0 / np.abs(L(j * wc_des))
+    k_c = 1.0 / np.abs(L(complex(0,1) * wc_des))
     Gc_lead *= k_c
 
     latex_paragraph = (
         f"The phase of the open-loop transfer function $G(j\\omega_c)$ at the desired crossover frequency "
         f"is $\\phi_G = {phi_G:.2f}^\\circ$. Thus the required phase lead is calculated as "
-        f"$\\phi_m = {phi_m * r2d:.2f}^\\circ$. Using the phase lead equation $$\\dfrac{{z}}{{p}} = "
-        f"\\dfrac{{1 - \\sin(\\phi_m)}}{{1 + \\sin(\\phi_m)}} = {zdp:.3f}.$$ The zero and pole of the lead "
+        f"$\\phi_required = {phi_required * r2d:.2f}^\\circ$. Using the phase lead equation $$\\dfrac{{z}}{{p}} = "
+        f"\\dfrac{{1 - \\sin(\\phi_required)}}{{1 + \\sin(\\phi_required)}} = {zdp:.3f}.$$ The zero and pole of the lead "
         f"compensator are then placed at $z = {z:.2f}$ and $p = {p:.2f}$, respectively. Finally, the "
         f"compensator gain is adjusted to achieve the desired crossover frequency, resulting in "
         f"$k_c = {k_c:.2f}$. The resulting lead compensator transfer function is "
@@ -423,8 +594,6 @@ def lag_design(gain_inc=10, gamma=10, wc=1, verbose=False):
         return ct.tf([1, zl], [1, pl]), latex_paragraph
     else:
         return ct.tf([1, zl], [1, pl])
-
-import numpy as np
 
 def system_type(L, tol=1e-9):
     """
@@ -489,24 +658,39 @@ def find_wpi(omega, G, phi=180, verbose=False):
     return omega[idx], idx
 
 def pshift(Gp):
-    Gp = np.asarray(Gp)
+    '''shift phase to within +/-180 or +/-pi'''
+    Gp = np.asarray(Gp, dtype=float)
 
-    Gpmax = np.pi
-    if np.max(np.abs(Gp)) > 2*np.pi + 1e-3: # likely in degrees
-        Gpmax = 180        
+    # detect units
+    if np.max(np.abs(Gp)) > 2*np.pi + 1e-3:
+        # degrees
+        period = 360.0
+        Gpmax = 180.0
+    else:
+        # radians
+        period = 2*np.pi
+        Gpmax = np.pi
 
-    while (np.max(Gp) < -Gpmax):
-        Gp += 2 * np.pi
-    while (np.min(Gp) > Gpmax):
-        Gp -= 2 * np.pi
+    while np.max(Gp) < -Gpmax:
+        Gp += period
+    while np.min(Gp) > Gpmax:
+        Gp -= period
 
     return Gp
 
-def phase_at_freq(G,s0):
-    '''For given G(s) and complex frequency s0, return phase of G(s0) in degrees'''
-    phi_fromG = sum([cmath.phase(x) for x in (s0 - G.zeros())])*r2d - \
-                sum([cmath.phase(x) for x in (s0 - G.poles())])*r2d
-    return phi_fromG % 360
+def Departure_angle(L,s0,Tol=1e-4):
+    '''Departure angle in degrees'''
+    # use Tol to remove the pole/zero at s0 from the evaluation
+    phi_d = (180+sum([cmath.phase(x) for x in (s0 - L.zeros()) if np.abs(x) > Tol])*r2d \
+                -sum([cmath.phase(x) for x in (s0 - L.poles()) if np.abs(x) > Tol])*r2d) % 360 
+    return phi_d
+
+def Arrival_angle(L,s0,Tol=1e-4):
+    '''Departure angle in degrees'''
+    # use Tol to remove the pole/zero at s0 from the evaluation
+    phi_a = (180-sum([cmath.phase(x) for x in (s0 - L.zeros()) if np.abs(x) > Tol])*r2d \
+                +sum([cmath.phase(x) for x in (s0 - L.poles()) if np.abs(x) > Tol])*r2d) % 360
+    return phi_a
 
 def caption(txt, fig=None, xloc=0.5, yloc=-0.05):
     """
@@ -554,6 +738,13 @@ def Read_data(file_name, comments=["#", "F"], cols=[0]):
     return np.loadtxt(file_name, comments=comments, delimiter=",", usecols=cols)
 
 def add_break_info(ax, break_info, dim=None, tol=1e-6):
+    '''Add the root locus break in/out info to the plot
+    inputs:
+    ax: plot
+    break_info: from add_break_info
+    dim: plot size
+    tol: 
+    '''
     ymin, ymax = ax.get_ylim()
     ydelta = (ymax - ymin) / 10.0
     xmin, xmax = ax.get_xlim()
@@ -586,10 +777,12 @@ def add_break_info(ax, break_info, dim=None, tol=1e-6):
         )
 
 def near_zero(P, Tol=1e-12):
-    P.num[0][0] = [x if abs(x) > Tol else 0.0 for x in P.num[0][0]]
-    P.den[0][0] = [x if abs(x) > Tol else 0.0 for x in P.den[0][0]]
-    import control
-    return control.tf(P.num, P.den)
+    '''remove small terms in the num/den of the TF'''
+    if not isinstance(P, ct.TransferFunction):
+        return P
+    num = [x if abs(x) > Tol else 0.0 for x in P.num[0][0]]
+    den = [x if abs(x) > Tol else 0.0 for x in P.den[0][0]]
+    return ct.tf(num, den)
 
 def log_interp(zz, xx, yy):
     logz = np.log10(zz)
@@ -597,8 +790,6 @@ def log_interp(zz, xx, yy):
     logy = np.log10(yy)
     return np.power(10.0, np.interp(logz, logx, logy))
 
-# balanced truncation
-from scipy.linalg import solve_continuous_lyapunov, svd
 def balred(G, order = None, DCmatch = False, check = False, method = None, Tol=1e-9):
     '''
     Balanced Model reduction using both methods discussed here
@@ -610,6 +801,8 @@ def balred(G, order = None, DCmatch = False, check = False, method = None, Tol=1
 
     order: dim of system to return
     '''
+    from scipy.linalg import solve_continuous_lyapunov, svd
+
     is_ss = isinstance(G, ct.StateSpace) # in SS form already?
     if is_ss:
         Gin = ct.ss2tf(G)
@@ -643,7 +836,6 @@ def balred(G, order = None, DCmatch = False, check = False, method = None, Tol=1
     U = np.linalg.cholesky(Wc)
 
     if method == 0:
-        print("Using Method 0")
         Z = np.linalg.cholesky(Wo)
         W, Sigma, Vh = svd(U.T @ Z)
         Sigma_sqrt_inv = np.linalg.inv(np.diag(np.sqrt(Sigma)))
@@ -718,7 +910,6 @@ def balred(G, order = None, DCmatch = False, check = False, method = None, Tol=1
         print(np.linalg.inv(T.T) @Wo @ Ti)
         print("\nOriginal model HSV: ",hsv(Wc,Wo))
 
-
     Gr = near_zero(ct.ss2tf(Gr)) * ct.tf([1], [1, 0]) ** number_cut
     return ct.tf2ss(Gr) if is_ss else Gr 
 
@@ -726,12 +917,19 @@ def pretty_row_print(X, msg=""):
     print(msg + ", ".join("({0.real:.2f} + {0.imag:.2f}i)".format(x) if np.iscomplex(x) else "{:.3f}".format(x.real) for x in X))
 
 def feedback_ff(G, K, Kff):
-    import control
-    from control.matlab import tf
-    if not isinstance(G, control.TransferFunction):
-        G = control.tf(G)
-    if not isinstance(K, control.TransferFunction):
-        K = control.tf(K)
+    if isinstance(G, (int, float, np.number)):
+        G = ct.tf([G], [1])
+    elif isinstance(K, ct.StateSpace):
+        G = ct.ss2tf(G)
+    elif not isinstance(G, ct.TransferFunction):
+        raise TypeError("G must be a scalar, TransferFunction, or StateSpace")
+
+    if isinstance(K, (int, float, np.number)):
+        K = ct.tf([K], [1])
+    elif isinstance(K, ct.StateSpace):
+        K = ct.ss2tf(K)
+    elif not isinstance(K, ct.TransferFunction):
+        raise TypeError("K must be a scalar, TransferFunction, or StateSpace")
 
     NG = G.num[0][0]
     DG = G.den[0][0]
@@ -747,7 +945,7 @@ def feedback_ff(G, K, Kff):
     NGDC = np.pad(NGDC, (max_len - len(NGDC), 0), "constant")
     DGDC = np.pad(DGDC, (max_len - len(DGDC), 0), "constant")
 
-    return tf(Kff * NGDC + NGNC, DGDC + NGNC)
+    return ct.tf(Kff * NGDC + NGNC, DGDC + NGNC)
 
 def writeGc(filename, Gc):
     """
@@ -767,8 +965,7 @@ def writeGc(filename, Gc):
 
 ######################################################   
 # sympy helpers
-######################################################
-
+#####################################################
 def round_constants(expr, ndigits=3):
     return expr.xreplace({
         c: sp.Float(c, ndigits) for c in expr.atoms()
@@ -779,7 +976,84 @@ def round_constants(expr, ndigits=3):
 ######################################################   
 # TF helpers
 ######################################################
-from IPython.display import Math
+def write_latex_array(X, filename, msgs=None, cols=1, tol=1e-12):
+    """
+    Write a list/array of (possibly complex) numbers to a LaTeX array
+    that can be \\input{} directly.
+
+    Parameters
+    ----------
+    X : iterable
+        Numbers (real or complex)
+    filename : str
+        Output .tex file
+    msgs : str
+        latex label
+    cols : int
+        Number of columns in the array
+    tol : float
+        Imaginary-part tolerance for treating numbers as real
+    """
+    def fmt(x):
+        xr = np.real(x)
+        xi = np.imag(x)
+        if abs(xi) < tol:
+            return f"{xr:.3f}"
+        else:
+            sign = "+" if xi >= 0 else "-"
+            return f"({xr:.2f} {sign} {abs(xi):.2f}i)"
+
+    entries = [fmt(x) for x in X]
+
+    # split into rows
+    rows = [
+        entries[i:i+cols]
+        for i in range(0, len(entries), cols)
+    ]
+
+    with open(filename, "w") as f:
+        f.write("\\begin{array}{%s}\n" % ("c" * cols))
+        f.write(msgs)
+        for r in rows:
+            f.write("  " + " & ".join(r) + " \\\\\n")
+        f.write("\\end{array}\n")
+
+def show_tf_latex(P, label=None, sigfigs=4, show=None, factor=False, name=None):
+    var = "s"
+
+    if label is None:
+        label = f"G({var})"
+    if name is not None:
+        label = name
+
+    num = np.array(P.num[0][0], dtype=float)
+    den = np.array(P.den[0][0], dtype=float)
+
+    if factor:
+        Kn, rnum, qnum = factor_poly_real(num)
+        Kd, rden, qden = factor_poly_real(den)
+
+        # cancel common real roots
+        rnum_c, rden_c = cancel_common_real_roots(rnum, rden)
+
+        num_body = factors_to_latex(rnum_c, qnum, var, sigfigs)
+        den_body = factors_to_latex(rden_c, qden, var, sigfigs)
+
+        frac = build_frac_latex_gain_in_numer(Kn, num_body, Kd, den_body, sigfigs)
+
+    else:
+        # polynomial (unfactored) form
+        num_tex = _poly_to_latex(num, sigfigs=sigfigs, var=var, discrete=False)
+        den_tex = _poly_to_latex(den, sigfigs=sigfigs, var=var, discrete=False)
+        frac = rf"\displaystyle \frac{{{num_tex}}}{{{den_tex}}}"
+
+    msgs = Math(label + " = " + frac)
+
+    if show:
+        display(msgs)
+
+    return msgs
+
 
 def _num_to_latex(x, sigfigs=4):
     """
@@ -793,53 +1067,56 @@ def _num_to_latex(x, sigfigs=4):
         return rf"{base}\times 10^{{{exp}}}"
     return s
 
+def _sci_to_latex(s):
+    """
+    Convert '4.4e-06' -> '4.4 \\times 10^{-6}'
+    """
+    if "e" in s:
+        base, exp = s.split("e")
+        return rf"{base} \times 10^{{{int(exp)}}}"
+    return s
 
 def _poly_to_latex(coefs, sigfigs=4, var="s", discrete=False):
-    """
-    Convert a polynomial coefficient vector into a LaTeX string with proper signs,
-    and suppress the leading '1' for readability when appropriate.
-    """
     terms = []
     n = len(coefs)
 
     for i, val in enumerate(coefs):
-        v = round(val, sigfigs)
-        if abs(v) < 1e-12:
+
+        if abs(val) < 1e-12:
             continue
 
-        # determine sign
-        sign = "-" if v < 0 else "+"
-        mag = abs(v)
+        # sign and magnitude
+        sign = "-" if val < 0 else "+"
+        mag = abs(val)
+
+        # format once to significant figures
+        coeff_str = f"{mag:.{sigfigs}g}"
+        coeff_str = _sci_to_latex(coeff_str)
 
         if discrete:
             power = i
             if power == 0:
-                term_body = f"{mag:g}"
+                term_body = coeff_str
             else:
-                # omit '1' if mag==1
-                coeff_str = "" if mag == 1 else f"{mag:g}"
-                term_body = rf"{coeff_str}{var}^{{-{power}}}"
+                term_body = rf"{'' if coeff_str == '1' else coeff_str}{var}^{{-{power}}}"
         else:
             degree = n - 1 - i
             if degree > 1:
-                coeff_str = "" if mag == 1 else f"{mag:g}"
-                term_body = rf"{coeff_str}{var}^{degree}"
+                term_body = rf"{'' if coeff_str == '1' else coeff_str}{var}^{degree}"
             elif degree == 1:
-                coeff_str = "" if mag == 1 else f"{mag:g}"
-                term_body = rf"{coeff_str}{var}"
+                term_body = rf"{'' if coeff_str == '1' else coeff_str}{var}"
             else:
-                term_body = f"{mag:g}"
+                term_body = coeff_str
 
         terms.append((sign, term_body))
 
     if not terms:
         return "0"
 
-    # first term: no leading '+' if positive
+    # first term: suppress leading '+'
     first_sign, first_term = terms[0]
     result = ("" if first_sign == "+" else "-") + first_term
 
-    # append others
     for sign, term in terms[1:]:
         result += f" {sign} {term}"
 
@@ -861,11 +1138,24 @@ def tf_to_latex(G):
     nice_latex = raw_latex.replace(r"\frac", r"\dfrac")     # force displaystyle fractions
     return nice_latex
 
-def show_tf_latex(P, label=None, sigfigs=4):
+def _matrix_to_latex(M, sigfigs=4):
+    M = np.atleast_2d(np.array(M, dtype=float))
+    rows = []
+    for row in M:
+        rows.append(
+            " & ".join(f"{x:.{sigfigs}g}" for x in row)
+        )
+    body = r" \\ ".join(rows)
+    return r"\begin{bmatrix} " + body + r" \end{bmatrix}"
+
+def show_ss_latex(P, label=None, sigfigs=4, name=None):
     """
-    Display a TransferFunction as LaTeX with correct s/z variable
-    and z^-1 formatting for discrete systems.
+    Display a StateSpace system as LaTeX with A, B, C, D matrices.
     """
+
+    if not isinstance(P, ct.StateSpace):
+        raise TypeError("Input must be a control.StateSpace object")
+
     # detect discrete vs continuous
     try:
         is_discrete = ct.isdtime(P)
@@ -873,42 +1163,328 @@ def show_tf_latex(P, label=None, sigfigs=4):
         dt = getattr(P, "dt", None)
         is_discrete = isinstance(dt, (int, float)) and dt > 0
 
-    # pick variable and formatting mode
-    var = "z" if is_discrete else "s"
-    discrete_mode = is_discrete
+    var = "k" if is_discrete else "t"
 
-    # build label
-    if label is None:
-        label = rf"G({var})"
+    # label handling
+    if label is None and name is None:
+        label = ""
+    elif label is None:
+        label = name
     else:
-        label = rf"{label}({var})"
+        label = label
 
-    # try built-in LaTeX from control
-    try:
-        built_in = P._repr_latex_()
-    except Exception:
-        built_in = None
+    A, B, C, D = P.A, P.B, P.C, P.D
 
-    if built_in:
-        body = built_in.strip("$")
-        return Math(label + " = " + body)
+    A_tex = _matrix_to_latex(A, sigfigs)
+    B_tex = _matrix_to_latex(B, sigfigs)
+    C_tex = _matrix_to_latex(C, sigfigs)
+    D_tex = _matrix_to_latex(D, sigfigs)
 
-    # fallback: use coefficient vectors
-    try:
-        num = np.array(P.num[0][0], dtype=float)
-        den = np.array(P.den[0][0], dtype=float)
-    except Exception:
-        text = str(P).replace("_", r"\_")
-        return Math(r"\text{" + text + "}")
+    if is_discrete:
+        eqn = (
+            r"\begin{aligned}"
+            r"x_{k+1} &= " + A_tex + r" x_k + " + B_tex + r" u_k \\ "
+            r"y_k &= " + C_tex + r" x_k + " + D_tex + r" u_k"
+            r"\end{aligned}"
+        )
+    else:
+        eqn = (
+            r"\begin{aligned}"
+            r"\dot{x}(t) &= " + A_tex + r" x(t) + " + B_tex + r" u(t) \\ "
+            r"y(t) &= " + C_tex + r" x(t) + " + D_tex + r" u(t)"
+            r"\end{aligned}"
+        )
 
-    # build LaTeX from polynomials
-    num_tex = _poly_to_latex(num, sigfigs=sigfigs, var=var, discrete=discrete_mode)
-    den_tex = _poly_to_latex(den, sigfigs=sigfigs, var=var, discrete=discrete_mode)
+    if label:
+        return Math(label + ":\n" + eqn)
+    else:
+        return Math(eqn)
 
-    frac = r"\displaystyle \frac{" + num_tex + "}{" + den_tex + "}"
-    return Math(label + " = " + frac)
+# ---------- helpers ----------
+if 0:
+    def _build_linear_factor_from_root(root, var='s', Tol=1e-9, sigfigs=4):
+        # For a root r, factor is (var - r) -> printed as (var + a) where a = -r
+        r = complex(root)
+        if abs(r.imag) <= Tol:
+            a = -float(r.real)
+            if abs(a) <= Tol:
+                return var  # plain s
+            if a > 0:
+                return rf"({var} + {fmt(a, sigfigs)})"
+            else:
+                return rf"({var} - {fmt(abs(a), sigfigs)})"
+        else:
+            # complex linear factor (unlikely to print alone for real polynomials)
+            real = fmt(-r.real, sigfigs)
+            imag = fmt(-r.imag, sigfigs)
+            sign = '+' if r.imag < 0 else '-'
+            # show as (s - (a + jb)) with j sign adjusted: (s - (ar + j ai))
+            return rf"({var} - ({fmt(r.real,sigfigs)} {sign} {fmt(abs(r.imag),sigfigs)}j))"
+
+def fmt(x, sigfigs=4):
+    # format float for LaTeX: avoid scientific notation for moderate values
+    return np.format_float_positional(float(x), precision=sigfigs, trim='-')
+
+def build_frac_latex(Kn, num_body, Kd, den_body, sigfigs=4, tol=1e-8):
+    #fmt = lambda x: np.format_float_positional(x, precision=sigfigs, trim='-')
+
+    if num_body == "1":
+        num_body = None
+    if den_body == "1":
+        den_body = None
+
+    K = Kn / Kd
+
+    if den_body is None and num_body is None:
+        return rf"\displaystyle {fmt(K)}"
+
+    if den_body is None:
+        if abs(K - 1) < tol:
+            return rf"\displaystyle {num_body}"
+        return rf"\displaystyle {fmt(K)}\,{num_body}"
+
+    if num_body is None:
+        return rf"\displaystyle {fmt(K)}\,\frac{{1}}{{{den_body}}}"
+
+    if abs(K - 1) < tol:
+        return rf"\displaystyle \frac{{{num_body}}}{{{den_body}}}"
+
+    return rf"\displaystyle {fmt(K)}\,\frac{{{num_body}}}{{{den_body}}}"
+
+def factors_to_latex(real_roots, quads, var="s", sigfigs=4, tol=1e-8):
+    #fmt = lambda x: np.format_float_positional(x, precision=sigfigs, trim='-')
+    parts = []
+
+    for r in sorted(real_roots):
+        a = -r
+        if abs(a) < tol:
+            parts.append(var)
+        elif a > 0:
+            parts.append(f"({var}+{fmt(a)})")
+        else:
+            parts.append(f"({var}-{fmt(abs(a))})")
+
+    for B, C in quads:
+        Bs = fmt(B)
+        Cs = fmt(C)
+        parts.append(f"({var}^2+{Bs}{var}+{Cs})")
+
+    return "1" if not parts else "".join(parts)
+
+# ---------- cancellation helper ----------
+def cancel_common_roots(K_num, roots_num, K_den, roots_den, tol=1e-6):
+    """
+    Remove common roots between num and den (within tol), update K_num/K_den accordingly.
+    Returns K_num_new, roots_num_new, K_den_new, roots_den_new
+    """
+    num_roots = roots_num.copy()
+    den_roots = roots_den.copy()
+    used_den = [False]*len(den_roots)
+    remaining_num = []
+    for r in num_roots:
+        found = False
+        for j, rd in enumerate(den_roots):
+            if not used_den[j] and abs(r - rd) <= tol:
+                # cancel this root pair
+                used_den[j] = True
+                found = True
+                break
+        if not found:
+            remaining_num.append(r)
+    remaining_den = [rd for j,rd in enumerate(den_roots) if not used_den[j]]
+    # If canceled roots, adjust scalar gain by multiplying factor (den/numer) from polynomial values.
+    # Simpler: leave K_num/K_den unchanged (they are leading coeffs). Cancelling roots does not change K_total.
+    return K_num, remaining_num, K_den, remaining_den
+
+# ---------- build fraction latex ----------
+def build_fraction_latex_from_roots(K_num, roots_num, K_den, roots_den,
+                                    var='s', sigfigs=4, Tol=1e-9, cancel=False):
+    # optionally cancel common roots
+    if cancel:
+        K_num, roots_num, K_den, roots_den = cancel_common_roots(K_num, roots_num, K_den, roots_den, tol=1e-6)
+
+    # build bodies from numeric roots (must be symmetric with factor builder)
+    num_parts = []
+    for r in sorted(roots_num, key=lambda z: (round(z.real,8), round(z.imag,8))):
+        num_parts.append(_build_linear_factor_from_root(r, var=var, Tol=Tol, sigfigs=sigfigs))
+    den_parts = []
+    for r in sorted(roots_den, key=lambda z: (round(z.real,8), round(z.imag,8))):
+        den_parts.append(_build_linear_factor_from_root(r, var=var, Tol=Tol, sigfigs=sigfigs))
+
+    num_body = "1" if len(num_parts) == 0 else "".join(num_parts)
+    den_body = "1" if len(den_parts) == 0 else "".join(den_parts)
+
+    # compute K_total
+    if abs(K_den) < 1e-16:
+        K_total = np.inf
+    else:
+        K_total = float(K_num) / float(K_den)
+    K_tex = fmt(K_total, sigfigs)
+
+    # clean
+    def clean(b):
+        if b is None:
+            return None
+        b = str(b).strip()
+        return None if b in ("", "1") else b
+
+    nb = clean(num_body)
+    db = clean(den_body)
+
+    # assemble with safe spacing and +/- handling
+    if nb is None and db is None:
+        if np.isfinite(K_total):
+            return rf"\displaystyle {K_tex}"
+        else:
+            return r"\displaystyle 0"
+
+    if db is None:
+        if abs(K_total - 1) < Tol:
+            return rf"\displaystyle {nb}"
+        elif abs(K_total + 1) < Tol:
+            return rf"\displaystyle -{nb}"
+        else:
+            return rf"\displaystyle {K_tex}\,{nb}"
+
+    if nb is None:
+        if abs(K_total - 1) < Tol:
+            return rf"\displaystyle \frac{{1}}{{{db}}}"
+        elif abs(K_total + 1) < Tol:
+            return rf"\displaystyle -\frac{{1}}{{{db}}}"
+        else:
+            return rf"\displaystyle {K_tex}\,\frac{{1}}{{{db}}}"
+
+    # both present
+    if abs(K_total - 1) < Tol:
+        return rf"\displaystyle \frac{{{nb}}}{{{db}}}"
+    elif abs(K_total + 1) < Tol:
+        return rf"\displaystyle -\frac{{{nb}}}{{{db}}}"
+    else:
+        return rf"\displaystyle {K_tex}\,\frac{{{nb}}}{{{db}}}"
+
+
+def cancel_common_real_roots(rnum, rden, tol=1e-6):
+    rnum = list(rnum)
+    rden = list(rden)
+
+    rnum_out = []
+    rden_used = [False]*len(rden)
+
+    for rn in rnum:
+        cancelled = False
+        for j, rd in enumerate(rden):
+            if not rden_used[j] and abs(rn - rd) < tol:
+                rden_used[j] = True
+                cancelled = True
+                break
+        if not cancelled:
+            rnum_out.append(rn)
+
+    rden_out = [rd for j, rd in enumerate(rden) if not rden_used[j]]
+    return rnum_out, rden_out
+
+def build_frac_latex_gain_in_numer(
+    Kn, num_body, Kd, den_body,
+    sigfigs=4, Tol=1e-9
+):
+    """
+    Build LaTeX for:
+        (Kn/Kd) * (num_body / den_body)
+    with the net gain placed INSIDE the numerator.
+
+    Rules:
+      - gain appears exactly once
+      - num_body or den_body == "1" is suppressed
+      - K≈1 omitted, K≈-1 shown as minus sign
+    """
+    #fmt = lambda x: np.format_float_positional(float(x), precision=sigfigs, trim='-')
+
+    def clean(body):
+        if body is None:
+            return None
+        b = str(body).strip()
+        return None if b in ("", "1") else b
+
+    nb = clean(num_body)
+    db = clean(den_body)
+
+    # net gain
+    K = Kn / Kd
+    Ktex = fmt(K)
+
+    # ---- cases ----
+
+    # pure scalar
+    if nb is None and db is None:
+        return rf"\displaystyle {Ktex}"
+
+    # numerator only
+    if db is None:
+        if abs(K - 1) < Tol:
+            return rf"\displaystyle {nb}"
+        elif abs(K + 1) < Tol:
+            return rf"\displaystyle -{nb}"
+        else:
+            return rf"\displaystyle {Ktex}\,{nb}"
+
+    # denominator only
+    if nb is None:
+        if abs(K - 1) < Tol:
+            return rf"\displaystyle \frac{{1}}{{{db}}}"
+        elif abs(K + 1) < Tol:
+            return rf"\displaystyle -\frac{{1}}{{{db}}}"
+        else:
+            return rf"\displaystyle \frac{{{Ktex}}}{{{db}}}"
+
+    # full fraction
+    if abs(K - 1) < Tol:
+        return rf"\displaystyle \frac{{{nb}}}{{{db}}}"
+    elif abs(K + 1) < Tol:
+        return rf"\displaystyle -\frac{{{nb}}}{{{db}}}"
+    else:
+        return rf"\displaystyle \frac{{{Ktex}\,{nb}}}{{{db}}}"
+
+def factor_poly_real(coeffs, tol=1e-6):
+    """
+    coeffs: highest to lowest
+    returns:
+        K          : leading coefficient
+        real_roots : list of real roots
+        quads      : list of (B, C) for s^2 + B s + C
+    """
+    coeffs = np.asarray(coeffs, dtype=float)
+    K = coeffs[0]
+    roots = np.roots(coeffs)
+
+    used = np.zeros(len(roots), dtype=bool)
+    real_roots = []
+    quads = []
+
+    for i, r in enumerate(roots):
+        if used[i]:
+            continue
+
+        imag_tol = tol * (1.0 + abs(r.real))
+        if abs(r.imag) <= imag_tol:
+            real_roots.append(r.real)
+            used[i] = True
+            continue
+
+        # otherwise, try to form a conjugate quadratic
+        for j in range(i+1, len(roots)):
+            if not used[j] and abs(roots[j] - np.conj(r)) <= imag_tol:
+                used[i] = used[j] = True
+                a = r.real
+                b = abs(r.imag)
+                quads.append((-2*a, a*a + b*b))
+                break
+
+    return K, real_roots, quads
+
+
 
 def pid(Kp = 0, Ki = 0, Kd = 0):
+    '''return tf form of a PID controller given Kp,Ki,Kd'''
     s = ct.tf((1,0),(1))
     return ct.tf(Kp,1) + Ki/s + Kd*s
 
@@ -920,4 +1496,168 @@ def nyquist(*args, **kwargs):
     kwargs.setdefault("title", "")
     return ct.nyquist_plot(*args, **kwargs)
 
-# module is quiet on import
+def write_latex_constants(S0, filename="./figs/constants.tex", idname=None, fmt="%.2f"):
+    def sanitize_letters(s):
+        # allow letters only (TeX control sequence safe)
+        return re.sub(r"[^A-Za-z]", "", s)
+
+    suffix = ""
+    if idname:
+        suffix = sanitize_letters(idname).capitalize()
+
+    with open(filename, "w") as f:
+        f.write("% Auto-generated by Python. Do not edit.\n")
+        for name, val in S0.items():
+            macro = sanitize_letters(name) + suffix
+            f.write(r"\def\%s{%s}" % (macro, fmt % val) + "\n")
+
+def write_tf_latex(G, filename, label, sigfigs=4, factor=None):
+    ''' G filename sigfigs'''
+    tex = show_tf_latex(G,sigfigs=sigfigs,factor=factor, show=False)._repr_latex_()
+    tex = tex.strip("$")
+
+    # remove everything up to the first '='
+    if "=" in tex:
+        tex = tex.split("=", 1)[1].strip()
+
+    with open(filename, "w") as f:
+        f.write(r"\[" + "\n")
+        f.write(label + " = " + tex + "\n")
+        f.write(r"\]" + "\n")
+
+
+def normalize_tf(G):
+    '''factor out non-unity gain for leading coefficient of the denominator'''
+    if isinstance(G, ct.StateSpace):
+        G = ct.ss2tf(G)
+
+    num,den = G.num[0][0],G.den[0][0]
+    num = num/den[0]
+    den = den/den[0]
+    return ct.tf(num,den)
+
+def find_double_real_poles(real_poles, tol=1e-5):
+    """
+    Identify real poles that occur more than once (within tolerance)
+    and return one representative value per location.
+    """
+    real_poles = np.asarray(real_poles, dtype=float)
+    real_poles = np.sort(real_poles)
+
+    doubles = []
+    i = 0
+    n = len(real_poles)
+
+    while i < n - 1:
+        if abs(real_poles[i+1] - real_poles[i]) < tol:
+            # representative value (average of cluster)
+            cluster = [real_poles[i]]
+            j = i + 1
+            while j < n and abs(real_poles[j] - real_poles[i]) < tol:
+                cluster.append(real_poles[j])
+                j += 1
+            doubles.append(np.mean(cluster))
+            i = j
+        else:
+            i += 1
+
+    return doubles
+
+def U(t):
+    """
+    Unit step function.
+
+    Parameters
+    ----------
+    t : array_like
+
+    Returns
+    -------
+    ndarray
+    """
+    t = np.asarray(t)
+    u = np.zeros_like(t)
+    u[t >= 0] = 1
+    return u
+
+
+def legend_best_combined(ax, candidates=None,
+                         w_text=10.0, w_data=1.0,
+                         **legend_kwargs):
+    """
+    Place legend minimizing overlap with both text (incl. AnchoredText)
+    and plotted data, similar to loc='best' but text aware.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+    candidates : iterable of str
+        Legend locations to consider.
+    w_text : float
+        Weight for text overlap (large).
+    w_data : float
+        Weight for data overlap (smaller).
+    **legend_kwargs :
+        Passed to ax.legend().
+
+    Returns
+    -------
+    legend : matplotlib.legend.Legend
+    """
+    if candidates is None:
+        candidates = [
+            "upper right",
+            "upper left",
+            "lower left",
+            "lower right",
+        ]
+
+    fig = ax.figure
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+
+    # ---- text / annotation bboxes ----
+    text_bboxes = []
+
+    for t in ax.texts:
+        text_bboxes.append(t.get_window_extent(renderer))
+
+    for a in ax.artists:
+        if hasattr(a, "get_window_extent"):
+            try:
+                text_bboxes.append(a.get_window_extent(renderer))
+            except Exception:
+                pass
+
+    # ---- data bboxes (lines, patches, collections) ----
+    data_bboxes = []
+
+    for line in ax.lines:
+        data_bboxes.append(line.get_window_extent(renderer))
+
+    for p in ax.patches:
+        data_bboxes.append(p.get_window_extent(renderer))
+
+    for c in ax.collections:
+        data_bboxes.append(c.get_window_extent(renderer))
+
+    best_loc = None
+    best_cost = np.inf
+
+    for loc in candidates:
+        leg = ax.legend(loc=loc, **legend_kwargs)
+        fig.canvas.draw()
+        leg_bbox = leg.get_window_extent(renderer)
+
+        text_overlap = sum(leg_bbox.overlaps(bb) for bb in text_bboxes)
+        data_overlap = sum(leg_bbox.overlaps(bb) for bb in data_bboxes)
+
+        cost = w_text * text_overlap + w_data * data_overlap
+
+        if cost < best_cost:
+            best_cost = cost
+            best_loc = loc
+
+        leg.remove()
+
+    return ax.legend(loc=best_loc, **legend_kwargs)

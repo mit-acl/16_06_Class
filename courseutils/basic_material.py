@@ -13,8 +13,9 @@ import sys
 import os
 import importlib.util
 from pathlib import Path
-
+import control
 import numpy as np
+
 float_formatter = "{:.4f}".format
 np.set_printoptions(formatter={'float': '{: 8.3f}'.format})
 from numpy import logspace, linspace
@@ -25,7 +26,7 @@ from numpy import logspace, linspace
 
 PYTHON_VERSION = sys.version_info
 NEW_ROOT_LOCUS_COLOR_STRING = PYTHON_VERSION >= (3, 11)
-SLYCOT_AVAILABLE = False
+SLYCOT_AVAILABLE = control.slycot_check()
 
 R2D = 180 / np.pi
 RPS2HZ = 1 / (2 * np.pi)
@@ -145,23 +146,6 @@ def _check_required_packages():
 # Numeric helpers
 # -------------------------------
 
-def U(t):
-    """
-    Unit step function.
-
-    Parameters
-    ----------
-    t : array_like
-
-    Returns
-    -------
-    ndarray
-    """
-    t = np.asarray(t)
-    u = np.zeros_like(t)
-    u[t >= 0] = 1
-    return u
-
 # -------------------------------
 # Plot helpers
 # -------------------------------
@@ -217,6 +201,10 @@ LOOSELY_DASHED = (0, (5, 10))
 DENSELY_DASHED = (0, (5, 1))
 LOOSELY_DASHDOTTED = (0, (3, 10, 1, 10))
 DENSELY_DASHDOTTED = (0, (3, 1, 1, 1))
+
+ORDINALS = [
+    "One", "Two", "Three", "Four", "Five",
+    "Six", "Seven", "Eight", "Nine", "Ten"]
 
 # ------------------------------------------------------------------
 # Self-update helper (instructor provided)
