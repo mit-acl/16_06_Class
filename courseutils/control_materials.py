@@ -679,15 +679,23 @@ def pshift(Gp):
     return Gp
 
 def Departure_angle(L,s0,Tol=1e-4):
-    '''Departure angle in degrees'''
-    # use Tol to remove the pole/zero at s0 from the evaluation
+    '''Departure angle in degrees
+    Inputs:
+        L
+        s0
+        Tol - to remove the pole/zero at s0 from the evaluation
+    '''
     phi_d = (180+sum([cmath.phase(x) for x in (s0 - L.zeros()) if np.abs(x) > Tol])*r2d \
                 -sum([cmath.phase(x) for x in (s0 - L.poles()) if np.abs(x) > Tol])*r2d) % 360 
     return phi_d
 
 def Arrival_angle(L,s0,Tol=1e-4):
-    '''Departure angle in degrees'''
-    # use Tol to remove the pole/zero at s0 from the evaluation
+    '''Departure angle in degrees
+    inputs:
+        L
+        s0
+        Tol - to remove the pole/zero at s0 from the evaluation
+    '''
     phi_a = (180-sum([cmath.phase(x) for x in (s0 - L.zeros()) if np.abs(x) > Tol])*r2d \
                 +sum([cmath.phase(x) for x in (s0 - L.poles()) if np.abs(x) > Tol])*r2d) % 360
     return phi_a
@@ -1497,6 +1505,16 @@ def nyquist(*args, **kwargs):
     return ct.nyquist_plot(*args, **kwargs)
 
 def write_latex_constants(S0, filename="./figs/constants.tex", idname=None, fmt="%.2f"):
+    '''
+consts = {"wn": wn,
+    "zeta": zeta,
+    "c1": c1,
+    "c2": c2}
+filename
+idname
+fmt
+
+    '''
     def sanitize_letters(s):
         # allow letters only (TeX control sequence safe)
         return re.sub(r"[^A-Za-z]", "", s)
