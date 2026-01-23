@@ -219,8 +219,51 @@ def RL_COM(L, standard_locus=True):
     Ang = (180.0 / (npoles - nzeros)) % 360.0 if standard_locus else (360.0 / (npoles - nzeros)) % 360.0
     return CoM, Ang
 
-def wrap_phase_neg(phi):
-    return ((phi % 360) - 360) if phi % 360 != 0 else 0
+def pshift(Gp, period = 2*np.pi):
+    '''shift phase to within +/-180 or +/-pi'''
+    Gp = np.asarray(Gp, dtype=float)
+
+    # detect units
+    if np.max(np.abs(Gp)) > 2*np.pi + 1e-3:
+        # degrees
+        period = 360.0
+
+    while np.max(Gp) < -period//2:
+        Gp += period
+    while np.min(Gp) > period//2:
+        Gp -= period
+
+    return Gp
+
+def wrap(phi, period = 2*np.pi):
+    '''wrap  the phase - units detected'''
+    # detect units
+    phi = np.asarray(phi, dtype=float)
+
+    if np.max(np.abs(phi)) > 2*np.pi + 1e-3: # likely in degrees
+        period = 360.0
+
+    return (phi + period//2) % (period) - period//2
+
+def wrap_phase_neg(phi, period = 2*np.pi):
+    '''
+    Wrap phase to negative side - useful for RL calcs and Bode plots
+    '''
+    phi = np.asarray(phi, dtype=float)
+
+    # detect units
+    if np.max(np.abs(phi)) > 2*np.pi + 1e-3: # likely in degrees
+        period = 360.0
+
+    #((phi % period) - period) if phi % period != 0 else 0
+    # indices of the 2 groups
+    II = phi % period != 0
+    III = phi % period == 0
+    #shift the phases
+    phi[II] = (phi[II] % period) - period
+    phi[III] = 0*phi[III]
+
+    return phi
 
 def Root_Locus_design_cancel(G, s_target=complex(-1, 2), s_cancel=-1, verbose=True):
     """
@@ -544,14 +587,12 @@ class Step_info:
 # More utilities
 # -------------------------------
 
-def wrap(phase, period = 360 ) :
-    return (phase + period//2) % (period) - period//2
-
 def lead_design(G, wc_des = 1, PMdes = 45, verbose=None):
 
-    Gf = G(complex(0, 1) * wc_des)
+    j = complex(0,1)
+    Gf = G(j*wc_des)
     phi_G = wrap_phase_neg(np.angle(Gf)) * r2d # phase of plant at wc (degs)
-    PM = wrap(180.0 + phi_G)
+    PM =  wrap(180.0 + phi_G)
 
     if verbose:
         print(f"Plant phase {phi_G:.2f}° , PMdes {PMdes:.2f}°, Current PM {PM:.2f}°, Phase required {PMdes - PM:.2f}°")
@@ -563,7 +604,7 @@ def lead_design(G, wc_des = 1, PMdes = 45, verbose=None):
 
     Gc_lead = ct.tf([1, z], [1, p])
     L = G * Gc_lead
-    k_c = 1.0 / np.abs(L(complex(0,1) * wc_des))
+    k_c = 1.0 / np.abs(L(j * wc_des))
     Gc_lead *= k_c
 
     latex_paragraph = (
@@ -627,56 +668,129 @@ def find_Kv(L):
 def find_Ka(L):
     return static_error_constant(L, order = 2)
 
-def find_wc(omega, G, mag = 1.0):
-    '''Find freq for which |G| is closest to mag (default 1)'''
-    if isinstance(G, ct.TransferFunction) or isinstance(G, ct.StateSpace):
-        Gf = G(1j*omega) 
+def _eval_Gjw(G, omega):
+    '''Handle the different formats that a system model might be given'''
+    if isinstance(G, (ct.TransferFunction, ct.StateSpace)):
+        Gf = G(1j * omega)
     elif callable(G):
-        Gf = G(1j*omega)
-    elif len(G) > 1:
-        Gf = np.asarray(G, dtype=np.complex128)
+        Gf = G(1j * omega)
     else:
-        raise TypeError("G must be a TransferFunction, callable, or array of complex values")
+        Gf = np.asarray(G, dtype=complex)
+
+    return np.atleast_1d(Gf), np.asarray(omega)
+
+def find_wc(omega, G, mag=1.0, find_all=False, rtol=0.01):
+    """
+    Find frequency where |G(jω)| is closest to `mag`.
+
+    Parameters
+    ----------
+    omega : array_like
+        Frequency grid (rad/s)
+    G : control.TransferFunction, control.StateSpace, callable, or array_like
+        System or frequency response
+    mag : float, default 1.0
+        Target magnitude
+    find_all : bool, default False
+        If True, return all frequencies within tolerance
+    rtol : float, default 0.05
+        Relative tolerance (fraction of mag)
+
+    Returns
+    -------
+    wc : float or ndarray
+        Frequency (or frequencies)
+    idx : int or ndarray
+        Index (or indices) into omega
+    """
+    Gf, omega = _eval_Gjw(G, omega)
 
     mag_err = np.abs(np.abs(Gf) - mag)
-    idx = np.argmin(mag_err)
+
+    if not find_all:
+        idx = np.argmin(mag_err)
+        return omega[idx], idx
+
+    tol = rtol * mag
+    idx_raw = np.where(mag_err <= tol)[0]
+
+    if idx_raw.size == 0:
+        return np.array([]), np.array([])
+
+    # group contiguous indices
+    groups = np.split(idx_raw, np.where(np.diff(idx_raw) > 1)[0] + 1)
+
+    # choose best representative per group
+    idx = np.array([g[np.argmin(mag_err[g])] for g in groups])
+
     return omega[idx], idx
 
-def find_wpi(omega, G, phi=180, verbose=False):
-    '''Find freq for which arg(G) = phi (assumes degrees)'''
-    Gf = G(1j * omega)
-    phase = np.angle(Gf, deg=True)
+def find_wpi(omega, G, phi=np.pi, find_all=False, rtol=0.01):
+    """
+    Find frequency where arg(G(jw)) = phi (degrees)
 
-    # wrap phase difference correctly
-    phase_err = np.abs((phase - phi + 180) % 360 - 180)
-    idx = np.argmin(phase_err)
+    If find_all is False
+        returns closest match (omega[idx], idx)
 
-    if verbose:
-        print(f"wpi = {omega[idx]:.3f} rad/s, idx = {idx}")
-        print(f"phase at wpi = {phase[idx]:.3f} deg")
+    If find_all is True
+        returns all crossings (omega_hits, idx_hits)
+    """
+    Gf, omega = _eval_Gjw(G, omega)
+
+    phase = np.angle(Gf)
+    phase_err = np.abs(np.angle(np.exp(1j * (phase - phi))))
+
+    if not find_all:
+        idx = np.argmin(phase_err)
+        return omega[idx], idx
+
+    tol = rtol * np.pi
+    idx_raw = np.where(phase_err <= tol)[0]
+
+    if idx_raw.size == 0:
+        return np.array([]), np.array([])
+
+    groups = np.split(idx_raw, np.where(np.diff(idx_raw) > 1)[0] + 1)
+    idx = np.array([g[np.argmin(phase_err[g])] for g in groups])
 
     return omega[idx], idx
 
-def pshift(Gp):
-    '''shift phase to within +/-180 or +/-pi'''
-    Gp = np.asarray(Gp, dtype=float)
+def find_PM(omega, G, mag=1.0, wc=None):
+    """
+    Compute phase margin from frequency response.
 
-    # detect units
-    if np.max(np.abs(Gp)) > 2*np.pi + 1e-3:
-        # degrees
-        period = 360.0
-        Gpmax = 180.0
-    else:
-        # radians
-        period = 2*np.pi
-        Gpmax = np.pi
+    Parameters
+    ----------
+    omega : array_like
+        Frequency grid (rad/s)
+    G : control.TransferFunction, control.StateSpace, callable, or array_like
+        Open-loop system or frequency response
+    mag : float, default 1.0
+        Gain crossover magnitude (normally 1)
 
-    while np.max(Gp) < -Gpmax:
-        Gp += period
-    while np.min(Gp) > Gpmax:
-        Gp -= period
+    Returns
+    -------
+    PM : float
+        Phase margin in degrees (NOT wrapped)
+    wc : float
+        Gain crossover frequency (rad/s)
+    idx : int
+        Index into omega corresponding to wc
+    """
+    if wc is None:
+        # find gain crossover
+        wc, idx = find_wc(omega, G, mag=mag)
 
-    return Gp
+    # evaluate frequency response
+    Gf, omega = _eval_Gjw(G, omega)
+
+    # phase at crossover (radians)
+    phi = np.angle(Gf[idx])
+
+    # phase margin (degrees)
+    PM = 180.0 + np.degrees(phi)
+
+    return PM, wc, idx
 
 def Departure_angle(L,s0,Tol=1e-4):
     '''Departure angle in degrees
@@ -710,7 +824,12 @@ def caption(txt, fig=None, xloc=0.5, yloc=-0.05):
     fig.text(xloc, yloc, txt, ha="center", size=MEDIUM_SIZE, color="blue")
 
 def new_pzmap(G, ax=None, title = None):
-    '''PZ map with nicer markers for the poles/zeros'''
+    '''PZ map with nicer markers for the poles/zeros
+    Inputs:
+        G
+        ax
+        title
+    '''
     if ax is None:
         fig, ax = plt.subplots(figsize=(5, 5))
     ax.plot(np.real(G.poles()), np.imag(G.poles()), "bx", ms=6)
@@ -725,20 +844,26 @@ def new_pzmap(G, ax=None, title = None):
     ax.grid(True)
     return ax
 
-def color_rl(ax):
+def color_rl(ax, ms=8, lw=1.5):
+    '''
+    Change RL line colors
+    Inputs:
+        ms = 8
+        lw = 1.5
+    '''
     for line in ax.lines:
         if line.get_linestyle() == "-":
-            line.set_linewidth(1.5)
+            line.set_linewidth(lw)
             line.set_color("blue")
         if line.get_marker() == "x":
-            line.set_markersize(8)
+            line.set_markersize(ms)
             line.set_color("blue")
         if line.get_marker() == "o":
-            line.set_markersize(8)
+            line.set_markersize(ms)
             line.set_markerfacecolor("r")
             line.set_markeredgecolor("r")
         if line.get_marker() == "d":
-            line.set_markersize(8)
+            line.set_markersize(ms)
             line.set_markerfacecolor("g")
             line.set_markeredgecolor("g")
 
@@ -984,7 +1109,7 @@ def round_constants(expr, ndigits=3):
 ######################################################   
 # TF helpers
 ######################################################
-def write_latex_array(X, filename, msgs=None, cols=1, tol=1e-12):
+def write_latex_array(X, filename, msgs=None, cols=1, tol=1e-12, decimals=2):
     """
     Write a list/array of (possibly complex) numbers to a LaTeX array
     that can be \\input{} directly.
@@ -1006,10 +1131,10 @@ def write_latex_array(X, filename, msgs=None, cols=1, tol=1e-12):
         xr = np.real(x)
         xi = np.imag(x)
         if abs(xi) < tol:
-            return f"{xr:.3f}"
+            return f"{xr:.{decimals}f}"
         else:
             sign = "+" if xi >= 0 else "-"
-            return f"({xr:.2f} {sign} {abs(xi):.2f}i)"
+            return f"({xr:.{decimals}f} {sign} {abs(xi):.{decimals}f}i)"
 
     entries = [fmt(x) for x in X]
 
@@ -1026,7 +1151,13 @@ def write_latex_array(X, filename, msgs=None, cols=1, tol=1e-12):
             f.write("  " + " & ".join(r) + " \\\\\n")
         f.write("\\end{array}\n")
 
-def show_tf_latex(P, label=None, sigfigs=4, show=None, factor=False, name=None):
+def show_tf_latex(P, label=None, sigfigs=2, show=None, factor=False, name=None):
+    ''' 
+    P: system
+    label
+    show
+    factor
+    '''
     var = "s"
 
     if label is None:
@@ -1229,9 +1360,15 @@ if 0:
             # show as (s - (a + jb)) with j sign adjusted: (s - (ar + j ai))
             return rf"({var} - ({fmt(r.real,sigfigs)} {sign} {fmt(abs(r.imag),sigfigs)}j))"
 
-def fmt(x, sigfigs=4):
-    # format float for LaTeX: avoid scientific notation for moderate values
-    return np.format_float_positional(float(x), precision=sigfigs, trim='-')
+def fmt(x, sigfigs=4, tol=1e-10):
+    x = float(x)
+    if abs(x) < tol:
+        return f"{0:.{sigfigs}f}"
+    return f"{x:.{sigfigs}f}"
+
+#def fmt(x, sigfigs=4):
+#    # format float for LaTeX: avoid scientific notation for moderate values
+#    return np.format_float_positional(float(x), precision=sigfigs, trim='-')
 
 def build_frac_latex(Kn, num_body, Kd, den_body, sigfigs=4, tol=1e-8):
     #fmt = lambda x: np.format_float_positional(x, precision=sigfigs, trim='-')
@@ -1244,15 +1381,15 @@ def build_frac_latex(Kn, num_body, Kd, den_body, sigfigs=4, tol=1e-8):
     K = Kn / Kd
 
     if den_body is None and num_body is None:
-        return rf"\displaystyle {fmt(K)}"
+        return rf"\displaystyle {fmt(K, sigfigs)}"
 
     if den_body is None:
         if abs(K - 1) < tol:
             return rf"\displaystyle {num_body}"
-        return rf"\displaystyle {fmt(K)}\,{num_body}"
+        return rf"\displaystyle {fmt(K, sigfigs)}\,{num_body}"
 
     if num_body is None:
-        return rf"\displaystyle {fmt(K)}\,\frac{{1}}{{{den_body}}}"
+        return rf"\displaystyle {fmt(K, sigfigs)}\,\frac{{1}}{{{den_body}}}"
 
     if abs(K - 1) < tol:
         return rf"\displaystyle \frac{{{num_body}}}{{{den_body}}}"
@@ -1268,13 +1405,15 @@ def factors_to_latex(real_roots, quads, var="s", sigfigs=4, tol=1e-8):
         if abs(a) < tol:
             parts.append(var)
         elif a > 0:
-            parts.append(f"({var}+{fmt(a)})")
+            #parts.append(f"({var}+{fmt(a)})")
+            parts.append(f"({var}+{fmt(a, sigfigs)})")
         else:
-            parts.append(f"({var}-{fmt(abs(a))})")
+            #parts.append(f"({var}-{fmt(abs(a))})")
+            parts.append(f"({var}-{fmt(abs(a), sigfigs)})")
 
     for B, C in quads:
-        Bs = fmt(B)
-        Cs = fmt(C)
+        Bs = fmt(B, sigfigs)
+        Cs = fmt(C, sigfigs)
         parts.append(f"({var}^2+{Bs}{var}+{Cs})")
 
     return "1" if not parts else "".join(parts)
@@ -1391,10 +1530,7 @@ def cancel_common_real_roots(rnum, rden, tol=1e-6):
     rden_out = [rd for j, rd in enumerate(rden) if not rden_used[j]]
     return rnum_out, rden_out
 
-def build_frac_latex_gain_in_numer(
-    Kn, num_body, Kd, den_body,
-    sigfigs=4, Tol=1e-9
-):
+def build_frac_latex_gain_in_numer(Kn, num_body, Kd, den_body, sigfigs=4, Tol=1e-9):
     """
     Build LaTeX for:
         (Kn/Kd) * (num_body / den_body)
@@ -1418,7 +1554,7 @@ def build_frac_latex_gain_in_numer(
 
     # net gain
     K = Kn / Kd
-    Ktex = fmt(K)
+    Ktex = fmt(K, sigfigs)
 
     # ---- cases ----
 
@@ -1506,14 +1642,13 @@ def nyquist(*args, **kwargs):
 
 def write_latex_constants(S0, filename="./figs/constants.tex", idname=None, fmt="%.2f"):
     '''
-consts = {"wn": wn,
-    "zeta": zeta,
-    "c1": c1,
-    "c2": c2}
-filename
-idname
-fmt
-
+    consts = {"wn": wn,
+        "zeta": zeta,
+        "c1": c1,
+        "c2": c2}
+    filename
+    idname
+    fmt="%.2f"
     '''
     def sanitize_letters(s):
         # allow letters only (TeX control sequence safe)
