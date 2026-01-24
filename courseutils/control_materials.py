@@ -104,7 +104,9 @@ def Root_Locus_gains(L, Krange=None, Tol=1e-5, standard_locus=True, Tol_max=1e3,
     """
     Augment RL gains to include break-in/break-out points; returns augmented Krange.
 
-    Tol_max - limits how large the figure will be
+    Tol - closeness to being real
+    standard_locus - 180 or 0 deg locus
+    Tol_max - limits how large the gains found will be
     verbose - enables additional return of break info
     debug - extensive on screen information
     """
@@ -125,12 +127,14 @@ def Root_Locus_gains(L, Krange=None, Tol=1e-5, standard_locus=True, Tol_max=1e3,
         poles: List[float]
 
     try:
-        Num = np.asarray(L.num[0][0], dtype=float)
-        Den = np.asarray(L.den[0][0], dtype=float)
-        npoles = len(L.den[0][0])
-        nzeros = len(L.num[0][0])
+        Num, Den = ct.tfdata(L)
+        Num = np.squeeze(num)
+        Den = np.squeeze(den)
+
+        npoles = len(Den)
+        nzeros = len(Num)
         n_add = int(npoles - nzeros)
-        L_num_add = np.pad(L.num[0][0], (n_add, 0), "constant", constant_values=(0,))
+        L_num_add = np.pad(Num, (n_add, 0), "constant", constant_values=(0,))
 
         dNds = np.polyder(Num) if len(Num) > 1 else np.array([0.0])
         dDds = np.polyder(Den) if len(Den) > 1 else np.array([0.0])
@@ -161,7 +165,7 @@ def Root_Locus_gains(L, Krange=None, Tol=1e-5, standard_locus=True, Tol_max=1e3,
         # find the location of the break in/out pts -- given by duplicate real poles
         if len(Kkeep) > 0:
             for kk in np.array(Kkeep):
-                phi_temp = L.den[0][0] + kk * L_num_add
+                phi_temp = Den + kk * L_num_add
 
                 scl = np.roots(phi_temp) # clp poles for that gain
                 if debug:
@@ -197,9 +201,8 @@ def Root_Locus_gains(L, Krange=None, Tol=1e-5, standard_locus=True, Tol_max=1e3,
                     else:
                         pass
 
-
     except Exception as e:
-        print("failed to find Krange:", e)
+        print("failed to find breakin/out points:", e)
 
     Krange = [float(k) for k in Krange]
 
@@ -212,16 +215,16 @@ def RL_COM(L, standard_locus=True):
     """
     Return center of mass and angle for root locus asymptotes.
     """
-    npoles = len(L.poles())
-    nzeros = len(L.zeros())
+    m = len(L.poles()) - len(L.zeros())
 
-    if npoles <= nzeros:
+    if m <= 0:
         return None, None
-    if npoles == (nzeros + 1):
+    if m <= 1: # technically need 2 more poles than zeros (FPE 265), but this is degenerate case 
         return None, 180.0 if standard_locus else 0.0
 
-    CoM = (sum(L.poles()) - sum(L.zeros())) / (npoles - nzeros)
-    Ang = (180.0 / (npoles - nzeros)) % 360.0 if standard_locus else (360.0 / (npoles - nzeros)) % 360.0
+    CoM = (sum(L.poles()) - sum(L.zeros())) / m
+    Ang = (180.0 / m) % 360.0 if standard_locus else (360.0 / m) % 360.0
+
     return CoM, Ang
 
 def pshift(Gp, period = 2*np.pi):
@@ -920,8 +923,13 @@ def near_zero(P, Tol=1e-12):
     '''remove small terms in the num/den of the TF'''
     if not isinstance(P, ct.TransferFunction):
         return P
-    num = [x if abs(x) > Tol else 0.0 for x in P.num[0][0]]
-    den = [x if abs(x) > Tol else 0.0 for x in P.den[0][0]]
+
+    Num, Den = ct.tfdata(P)
+    Num = np.squeeze(Num)
+    Den = np.squeeze(Den)        
+
+    num = [x if abs(x) > Tol else 0.0 for x in Num]
+    den = [x if abs(x) > Tol else 0.0 for x in Den]
     return ct.tf(num, den)
 
 def log_interp(zz, xx, yy):
@@ -952,9 +960,19 @@ def balred(G, order = None, DCmatch = False, check = False, method = None, Tol=1
     if method is None:
         method = 0
 
-    G_trimmed = ct.tf(Gin.num[0][0], np.trim_zeros(Gin.den[0][0], "b"))
-    number_cut = len(Gin.den[0][0]) - len(G_trimmed.den[0][0])
+    # remove poles at origin, which are added back in at the end
+    num, den = ct.tfdata(Gin)
+    num = np.squeeze(num)
+    den = np.squeeze(den)
 
+    G_trimmed = ct.tf(num, np.trim_zeros(den, "b"))
+    num_trimmed, den_trimmed = ct.tfdata(G_trimmed)
+    num_trimmed = np.squeeze(num_trimmed)
+    den_trimmed = np.squeeze(den_trimmed)
+
+    number_cut = len(den) - len(den_trimmed) # how many poles at origin to add back in
+
+    # now operate on the SS model of the trimmed system
     Gss = ct.tf2ss(G_trimmed)
     if order is None:
         order = Gss.A.shape[0] - 1
@@ -1071,10 +1089,13 @@ def feedback_ff(G, K, Kff):
     elif not isinstance(K, ct.TransferFunction):
         raise TypeError("K must be a scalar, TransferFunction, or StateSpace")
 
-    NG = G.num[0][0]
-    DG = G.den[0][0]
-    NC = K.num[0][0]
-    DC = K.den[0][0]
+    NG, DG = ct.tfdata(G)
+    NG = np.squeeze(NG)
+    DG = np.squeeze(DG)
+
+    NC, DC = ct.tfdata(K)
+    NC = np.squeeze(NC)
+    DC = np.squeeze(DC)
 
     NGDC = np.convolve(NG, DC)
     NGNC = np.convolve(NG, NC)
@@ -1096,7 +1117,12 @@ def writeGc(filename, Gc):
     """
     zs = [float(np.real(z)) for z in Gc.zeros()]
     ps = [float(np.real(p)) for p in Gc.poles()]
-    gain = float(Gc.num[0][0][0] / Gc.den[0][0][0]) if (len(Gc.num[0][0]) and len(Gc.den[0][0])) else 0.0
+
+    num, den = ct.tfdata(Gc)
+    num = np.squeeze(num)
+    den = np.squeeze(den)
+
+    gain = float(num[0] / den[0]) if (len(num) and len(den)) else 0.0
 
     with open(filename, "w") as f:
         f.write("zeros:" + ",".join(f"{z:4.2f}" for z in zs) + "\n")
@@ -1172,8 +1198,9 @@ def show_tf_latex(P, label=None, sigfigs=2, show=None, factor=False, name=None):
     if name is not None:
         label = name
 
-    num = np.array(P.num[0][0], dtype=float)
-    den = np.array(P.den[0][0], dtype=float)
+    num, den = ct.tfdata(P)
+    num = np.squeeze(num)
+    den = np.squeeze(den)
 
     if factor:
         Kn, rnum, qnum = factor_poly_real(num)
@@ -1272,7 +1299,9 @@ def tf_to_latex(G):
     s = sp.Symbol('s')
     
     # Get numerator and denominator coefficients
-    num, den = G.num[0][0], G.den[0][0]
+    num, den = ct.tfdata(G)
+    num = np.squeeze(num)
+    den = np.squeeze(den)
 
     # Convert to symbolic expressions
     num_poly = sum(np.round(coef,2) * s**i for i, coef in enumerate(reversed(num)))
@@ -1691,9 +1720,14 @@ def normalize_tf(G):
     if isinstance(G, ct.StateSpace):
         G = ct.ss2tf(G)
 
-    num,den = G.num[0][0],G.den[0][0]
-    num = num/den[0]
-    den = den/den[0]
+    num, den = ct.tfdata(G)
+    num = np.squeeze(num)
+    den = np.squeeze(den)
+
+    if den[0] != 0:
+        num = num/den[0]
+        den = den/den[0]
+
     return ct.tf(num,den)
 
 def find_double_real_poles(real_poles, tol=1e-5):
