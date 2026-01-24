@@ -5,7 +5,7 @@ Control utilities for 16.06.
 All environment/setup is opt-in via setup_environment().
 """
 
-__version__ = "16.06-0.4"
+__version__ = "16.06-0.5"
 
 import numpy as np
 import cmath
@@ -103,16 +103,21 @@ def setup_environment(*, verbose=False):
 def Root_Locus_gains(L, Krange=None, Tol=1e-5, standard_locus=True, Tol_max=1e3, verbose = False, debug=None):
     """
     Augment RL gains to include break-in/break-out points; returns augmented Krange.
+
+    Tol_max - limits how large the figure will be
+    verbose - enables additional return of break info
+    debug - extensive on screen information
     """
     # Basic checks
     if not isinstance(L, ct.TransferFunction):
         raise TypeError("Root_Locus_gains expects a control.TransferFunction (SISO).")
 
     if Krange is None:
+        # provide positive or negative range of K values
         Krange = (2 * standard_locus - 1) * np.logspace(-3, 3, num=2000)
     Krange = np.sort(np.append(Krange, 0))  # add zero
 
-    break_info = []   # ← declare once, at top of function
+    break_info = [] 
     
     @dataclass
     class BreakPoint:
@@ -245,25 +250,20 @@ def wrap(phi, period = 2*np.pi):
 
     return (phi + period//2) % (period) - period//2
 
-def wrap_phase_neg(phi, period = 2*np.pi):
-    '''
-    Wrap phase to negative side - useful for RL calcs and Bode plots
-    '''
+def wrap_phase_neg(phi, period=2*np.pi):
+    """
+    Wrap phase to (-period, 0].
+    Works for scalars and arrays.
+    Units (rad/deg) are auto-detected.
+    """
     phi = np.asarray(phi, dtype=float)
 
     # detect units
-    if np.max(np.abs(phi)) > 2*np.pi + 1e-3: # likely in degrees
+    if np.nanmax(np.abs(phi)) > 2*np.pi + 1e-3:
         period = 360.0
 
-    #((phi % period) - period) if phi % period != 0 else 0
-    # indices of the 2 groups
-    II = phi % period != 0
-    III = phi % period == 0
-    #shift the phases
-    phi[II] = (phi[II] % period) - period
-    phi[III] = 0*phi[III]
-
-    return phi
+    # wrap to (-period, 0]
+    return (phi % period) - period
 
 def Root_Locus_design_cancel(G, s_target=complex(-1, 2), s_cancel=-1, verbose=True):
     """
@@ -795,8 +795,8 @@ def find_PM(omega, G, mag=1.0, wc=None):
 def Departure_angle(L,s0,Tol=1e-4):
     '''Departure angle in degrees
     Inputs:
-        L
-        s0
+        L - system
+        s0 - target point
         Tol - to remove the pole/zero at s0 from the evaluation
     '''
     phi_d = (180+sum([cmath.phase(x) for x in (s0 - L.zeros()) if np.abs(x) > Tol])*r2d \
@@ -804,10 +804,10 @@ def Departure_angle(L,s0,Tol=1e-4):
     return phi_d
 
 def Arrival_angle(L,s0,Tol=1e-4):
-    '''Departure angle in degrees
-    inputs:
-        L
-        s0
+    '''Arrival angle in degrees
+    Inputs:
+        L - system
+        s0 - target point
         Tol - to remove the pole/zero at s0 from the evaluation
     '''
     phi_a = (180-sum([cmath.phase(x) for x in (s0 - L.zeros()) if np.abs(x) > Tol])*r2d \
@@ -823,26 +823,33 @@ def caption(txt, fig=None, xloc=0.5, yloc=-0.05):
         fig = plt.gcf()
     fig.text(xloc, yloc, txt, ha="center", size=MEDIUM_SIZE, color="blue")
 
-def new_pzmap(G, ax=None, title = None):
+def new_pzmap(G, ax = None, title = None):
     '''PZ map with nicer markers for the poles/zeros
     Inputs:
-        G
-        ax
+        G - system
+        ax - figure axis, returned if not provided
         title
     '''
     if ax is None:
         fig, ax = plt.subplots(figsize=(5, 5))
+        return_ax = True
+    else:
+        return_ax = False
+
     ax.plot(np.real(G.poles()), np.imag(G.poles()), "bx", ms=6)
-    ax.plot(np.real(G.zeros()), np.imag(G.zeros()), "o", ms=6, markeredgewidth=2,
-            markeredgecolor="r", markerfacecolor="r")
+    ax.plot(np.real(G.zeros()), np.imag(G.zeros()), "o", ms=6, 
+        markeredgewidth=2,markeredgecolor="r", markerfacecolor="r")
     ax.set_xlabel("Real")
     ax.set_ylabel("Imaginary")
+
     if title is None:
         ax.set_title("Pole-Zero Map")
     else:
         ax.set_title(title)
     ax.grid(True)
-    return ax
+
+    if return_ax:
+        return ax
 
 def color_rl(ax, ms=8, lw=1.5):
     '''
