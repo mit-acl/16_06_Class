@@ -159,17 +159,17 @@ def get_colors():
         "salmon", "brown", "darkblue", "tomato", "violet",
         "tan", "pink"]
 
-def nicegrid(ax, hh=2):
+def nicegrid(ax, hh=None): #hh is legacy
     """
     Apply standard grid styling to one or more axes.
     """
     try:
         for a in ax:
-            _jgrid(a, hh)
+            _jgrid(a)
     except TypeError:
-        _jgrid(ax, hh)
+        _jgrid(ax)
 
-def _jgrid(ax, hh=2):
+def _jgrid(ax):
     import matplotlib.ticker as ticker
 
     ax.grid(True, which="major", color="#666666", linestyle=":")
@@ -205,6 +205,10 @@ DENSELY_DASHDOTTED = (0, (3, 1, 1, 1))
 ORDINALS = [
     "One", "Two", "Three", "Four", "Five",
     "Six", "Seven", "Eight", "Nine", "Ten"]
+
+from itertools import cycle
+lines = ["-","--","-.",":"]
+linecycler = cycle(lines)
 
 # ------------------------------------------------------------------
 # Self-update helper (instructor provided)
