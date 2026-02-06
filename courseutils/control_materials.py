@@ -128,8 +128,8 @@ def Root_Locus_gains(L, Krange=None, Tol=1e-5, standard_locus=True, Tol_max=1e3,
 
     try:
         Num, Den = ct.tfdata(L)
-        Num = np.squeeze(num)
-        Den = np.squeeze(den)
+        Num = np.atleast_1d(np.squeeze(Num))
+        Den = np.atleast_1d(np.squeeze(Den))
 
         npoles = len(Den)
         nzeros = len(Num)
@@ -213,7 +213,7 @@ def Root_Locus_gains(L, Krange=None, Tol=1e-5, standard_locus=True, Tol_max=1e3,
 
 def RL_COM(L, standard_locus=True):
     """
-    Return center of mass and angle for root locus asymptotes.
+    Return center of mass and angle (in degs) for root locus asymptotes.
     """
     m = len(L.poles()) - len(L.zeros())
 
@@ -268,17 +268,25 @@ def wrap_phase_neg(phi, period=2*np.pi):
     # wrap to (-period, 0]
     return (phi % period) - period
 
-def Root_Locus_design_cancel(G, s_target=complex(-1, 2), s_cancel=-1, verbose=True):
+def Root_Locus_design_cancel(G, s_target=complex(-1, 2), s_cancel=-1, verbose=False):
     """
     Root locus lead design by cancelling/placing pole at s_cancel to get CL poles at s_target.
     Returns Gc, Gcl_poles()
     """
 
-    phi_fromG = phase_at_freq(G,s_target)
-
+    info = None
     Gczeros = np.array([np.real(s_cancel)])
-    phi_from_Gc_zero = sum([cmath.phase(x) for x in (s_target - Gczeros)]) * r2d
-    phi_required = (180 + phi_fromG + phi_from_Gc_zero) % 360
+
+    # phase from G at target pole
+    phi_fromG = wrap_phase_neg(phase_at_freq(G, s_target))
+    phi_fromG = float(np.atleast_1d(phi_fromG)[0])
+
+    # phase from cancelling zero
+    phi_from_Gc_zero = sum(cmath.phase(s_target - z) for z in np.atleast_1d(np.real(s_cancel))) * r2d
+    phi_from_Gc_zero = float(phi_from_Gc_zero)
+
+    # required phase to satisfy angle condition
+    phi_required = -wrap_phase_neg(-180.0 - (phi_fromG + phi_from_Gc_zero))
 
     if verbose:
         print(f"Phase from G {phi_fromG:4.2f}")
@@ -292,13 +300,25 @@ def Root_Locus_design_cancel(G, s_target=complex(-1, 2), s_cancel=-1, verbose=Tr
     Gcl = ct.feedback(G * Gc)
 
     if verbose:
-        return Gc, Gcl.poles(), SimpleNamespace(**{
-        "phi_from_G": phi_fromG,
-        "phi_from_Gc": phi_from_Gc_zero,
-        "phi_required": phi_required,
-    })
-    else:
-        return Gc, Gcl.poles()
+        latex_paragraph = (
+            rf"The phase of the open-loop plant at the target pole $s_{{target}}$ is "
+            rf"$\phi_G = {phi_fromG:.2f}^\circ$. A compensator zero placed at $z = {Gczeros[0]:.2f}$ contributes an additional phase of "
+            rf"$\phi_{{Gc,z}} = {phi_from_Gc_zero:.2f}^\circ$. Enforcing the root-locus angle condition "
+            rf"$\angle G(s_{{target}}) + \angle G_c(s_{{target}}) = -180^\circ$, the (absolute value of the) required phase from the compensator pole is "
+            rf"$$\phi_{{required}} = \arctan\!\left(\frac{{Im\{{s_{{target}}\}}}}{{Re\{{s_{{target}}\}} + P}}\right) \qquad \Rightarrow \qquad "
+            rf"P = -Re\{{s_{{target}}\}} + \frac{{Im\{{s_{{target}}\}}}}{{\tan(\phi_{{required}})}}$$ "            
+            rf"so that, with $\phi_{{required}} = {phi_required:.2f}$ degs, the compensator pole is at $P = {P:.3f}$. \newline This yields $G_c(s) = \dfrac{{s + {-Gczeros[0]:.2f}}}{{s + {P:.2f}}}$, and" 
+            rf" the compensator gain is selected to satisfy $$|G(s_{{target}})G_c(s_{{target}})| = 1,$$ resulting in a gain of $k_c = {Gain:.3f}$, so that"
+            rf"$$G_c(s) = {Gain:.2f}\dfrac{{s + {-Gczeros[0]:.2f}}}{{s + {P:.2f}}}$$" 
+        )
+        info = SimpleNamespace(
+            phi_from_G=phi_fromG,
+            phi_from_Gc=phi_from_Gc_zero,
+            phi_required=phi_required,
+            info=latex_paragraph,
+        )
+
+    return Gc, Gcl.poles(), info
 
 def phase_at_freq(G,s0,modulation = None):
     '''For given G(s) and complex frequency s0, return phase of G(s0) in degrees'''
@@ -312,52 +332,93 @@ def phase_at_freq(G,s0,modulation = None):
     else:
         return phi_fromG % 360
 
-def Root_Locus_design_ratio(G, s_target=complex(-1, 2), gamma=10, z0=None, idx=None, verbose=False):
+def Root_Locus_design_ratio(G, s_target=complex(-1, 2), gamma=10, verbose=False):
     """
     Root locus design using zero/pole ratio gamma.
     Returns Gc, Gcl_poles()
     """
-    from scipy.optimize import minimize
 
-    def func(theta, gam, G, s_0):
-        z = np.exp(theta)
-        Gc = ct.tf((1, float(z)), (1, float(gam * z)))
-        L = Gc * G
-        phi_fromL = phase_at_freq(L,s_0)
-        phase_err = wrap(phi_fromL - 180, period = 360)
-        return phase_err**2
+    sigma_t = -s_target.real
+    omega_t = s_target.imag
 
-    if z0 is None:
-        z0 = -s_target.real / 2
+    phi_fromG = wrap_phase_neg(phase_at_freq(G,s_target))
+    phi_deg = -180 - phi_fromG 
+    tphi = np.tan(phi_deg/r2d)
 
-    res = minimize(func, x0=np.log(z0), args=(gamma, G, s_target), tol=1e-3, method="Nelder-Mead",
-                   options={"disp": verbose, "maxiter": 1000})
-    if not res.success:
-        raise RuntimeError("Optimization failed")
-    Gczeros = np.exp(res.x[0])
+    # Quadratic coefficients Az^2 + Bz + C = 0
+    A = gamma 
+    B = -(gamma + 1) * (sigma_t) - (gamma - 1)*omega_t/tphi
+    C =  (sigma_t**2 + omega_t**2)
+    # Solve quadratic
+    roots = np.roots([A, B, C])
 
-    # without gain
-    Gc = ct.tf((1, float(Gczeros)), (1, float(gamma * Gczeros)))
-    Gain = 1.0 / np.abs(G(s_target) * Gc(s_target))
+    # Choose physically meaningful root (positive real z)
+    z_candidates = [r.real for r in roots if abs(r.imag) < 1e-6 and r.real > 0]
+    if not z_candidates:
+        raise ValueError("No physically valid zero location found")
 
-    # apply gain
-    Gc *= Gain
+    z = z_candidates[0]
+    p = gamma * z
+    # Gain to satisfy magnitude condition at s_target
+    Gc = ct.tf([1,z],[1,p])
+    k = 1/np.abs(Gc(s_target)*G(s_target))
+    Gc = k*Gc
+
     L = G * Gc
-
     #close loop
     Gcl = ct.feedback(L)
 
-    return Gc, Gcl.poles()
+    # Build LaTeX
+    latex_paragraph = (
+        rf"The compensator must contribute ${phi_deg:.0f}^\circ$ "
+        rf"of phase at $s_{{\text{{target}}}}$, giving"
+        r"$$"
+        rf"\tan^{{-1}}\!\left(\dfrac{{{omega_t:.3f}}}{{z - ({sigma_t:.3f})}}\right)"
+        r" - "
+        rf"\tan^{{-1}}\!\left(\dfrac{{{omega_t:.3f}}}{{\gamma z - ({sigma_t:.3f})}}\right)"
+        rf" = {phi_deg:.0f}^\circ"
+        r"$$"
+        r"Using $\tan(A-B)=\dfrac{\tan A-\tan B}{1+\tan A\tan B}$ we obtain"
+        r"$$"
+        rf"\dfrac{{{omega_t:.3f}}}{{z - ({sigma_t:.3f})}}"
+        r" - "
+        rf"\dfrac{{{omega_t:.3f}}}{{\gamma z - ({sigma_t:.3f})}}"
+        rf" = \tan({phi_deg:.0f}^\circ)\left("
+        r"1 + "
+        rf"\dfrac{{{omega_t:.3f}}}{{z - ({sigma_t:.3f})}}"
+        rf"\dfrac{{{omega_t:.3f}}}{{\gamma z - ({sigma_t:.3f})}}"
+        r"\right)"
+        r"$$"
+        rf"which, with $\gamma = {gamma:.3f}$ simplifies to"
+        r"$$"
+        rf"{A:.3f} z^2 {B:+.3f} z {C:+.3f} = 0"
+        r"$$"
+        rf"Thus $z = {z:.3f}$ and $p = {p:.3f}$. "
+        rf"The required gain is $k = {k:.2f}$, yielding"
+        r"$$"
+        rf"G_c(s) = {k:.2f}\dfrac{{s+{z:.3f}}}{{s+{p:.3f}}}."
+        r"$$"
+    )
+
+    if verbose:
+        return Gc, Gcl.poles(), SimpleNamespace(**{
+        "phi_from_G": phi_fromG,
+        "phi_required": phi_deg,
+        "info": latex_paragraph,
+        "zero_candidates": z_candidates,
+    })
+    else:
+        return Gc, Gcl.poles()
 
 def Root_Locus_design_PD(G, s_target=complex(-1, 2), verbose=False):
     """
     PD design to place CL poles at s_target.
     Returns (Gc, Gcl_poles).
     """
-    phi_fromG = phase_at_freq(g,s_target)
-    phi_required = (np.pi - phi_fromG) % (2 * np.pi)
+    phi_fromG = phase_at_freq(G,s_target)
+    phi_required_deg = 180 - phi_fromG
 
-    Z = s_target.imag / np.tan(phi_required) - s_target.real
+    Z = s_target.imag / np.tan(phi_required_deg/r2d) - s_target.real
 
     # without gain
     Gc = ct.tf((1, Z), 1)
@@ -375,8 +436,6 @@ def Root_Locus_design_PD(G, s_target=complex(-1, 2), verbose=False):
         })
     else:
         return Gc, Gcl.poles()
-
-
 
 # -------------------------------
 # Step info class (keeps API but safer)
@@ -420,7 +479,7 @@ def max_overshoot(t, y, yss=None):
 
 def settling_time(t, y, tol=0.02, t0=0):
     """
-    Compute 2% settling time.
+    Compute Tol=2% settling time.
     Returns np.nan if never settles.
     """
     y = np.asarray(y)
@@ -572,10 +631,11 @@ class Step_info:
         ax.set_title("Step Response")
         ax.set_ylim(0, Ymax)
         ax.set_xlim(0, Tmax)
+        #ax.set_aspect('equal', adjustable='box')
 
         ax.axvline(x=self.Tr_values[0], ymax=0.1 * self.Yss / Ymax, c="r", ls="dashed")
         ax.axvline(x=self.Tr_values[1], ymax=0.9 * self.Yss / Ymax, c="r", ls="dashed")
-        ax.axvline(x=self.Ts, ymax=self.Yss / Ymax, c="grey", ls="dashed")
+        ax.axvline(x=self.Ts, ymax=self.Yss / Ymax * (1-self.SettlingTimeLimits[0]), c="grey", ls="dashed")
         ax.axvline(ymax=min((self.Yss * (1 + self.Mp)) / Ymax, 1.0), x=self.Tp, c="m", ls="dashed", lw=2)
         ax.axhline(y=(1 + self.SettlingTimeLimits[0]) * self.Yss, xmin=self.Ts / Tmax, c="grey", ls="dashed", lw=1)
         ax.axhline(y=(1 - self.SettlingTimeLimits[0]) * self.Yss, xmin=self.Ts / Tmax, c="grey", ls="dashed", lw=1)
@@ -924,12 +984,12 @@ def near_zero(P, Tol=1e-12):
     if not isinstance(P, ct.TransferFunction):
         return P
 
-    Num, Den = ct.tfdata(P)
-    Num = np.squeeze(Num)
-    Den = np.squeeze(Den)        
+    num, den = ct.tfdata(P)
+    num = np.atleast_1d(np.squeeze(num))
+    den = np.atleast_1d(np.squeeze(den))
 
-    num = [x if abs(x) > Tol else 0.0 for x in Num]
-    den = [x if abs(x) > Tol else 0.0 for x in Den]
+    num = [x if abs(x) > Tol else 0.0 for x in num]
+    den = [x if abs(x) > Tol else 0.0 for x in den]
     return ct.tf(num, den)
 
 def log_interp(zz, xx, yy):
@@ -962,8 +1022,8 @@ def balred(G, order = None, DCmatch = False, check = False, method = None, Tol=1
 
     # remove poles at origin, which are added back in at the end
     num, den = ct.tfdata(Gin)
-    num = np.squeeze(num)
-    den = np.squeeze(den)
+    num = np.atleast_1d(np.squeeze(num))
+    den = np.atleast_1d(np.squeeze(den))
 
     G_trimmed = ct.tf(num, np.trim_zeros(den, "b"))
     num_trimmed, den_trimmed = ct.tfdata(G_trimmed)
@@ -1071,8 +1131,44 @@ def balred(G, order = None, DCmatch = False, check = False, method = None, Tol=1
     Gr = near_zero(ct.ss2tf(Gr)) * ct.tf([1], [1, 0]) ** number_cut
     return ct.tf2ss(Gr) if is_ss else Gr 
 
-def pretty_row_print(X, msg=""):
-    print(msg + ", ".join("({0.real:.2f} + {0.imag:.2f}i)".format(x) if np.iscomplex(x) else "{:.3f}".format(x.real) for x in X))
+import numpy as np
+
+def pretty_row_print(X,msg="",sigfigs=None,decimals=3,complex_decimals=2):
+    """
+    Pretty print a row of real or complex numbers.
+
+    Exactly one of sigfigs or decimals should be used.
+    """
+
+    if sigfigs is not None and decimals is not None:
+        raise ValueError("Use either sigfigs or decimals, not both")
+
+    # normalize scalar to 1 element array
+    X = np.atleast_1d(X)
+
+    def fmt_real(x):
+        if sigfigs is not None:
+            return f"{x:.{sigfigs}g}"
+        else:
+            return f"{x:.{decimals}f}"
+
+    def fmt_complex(x):
+        r = x.real
+        i = x.imag
+        if sigfigs is not None:
+            return f"({r:.{sigfigs}g} + {i:.{sigfigs}g}i)"
+        else:
+            return f"({r:.{complex_decimals}f} + {i:.{complex_decimals}f}i)"
+
+    out = []
+    for x in X:
+        x = complex(x)
+        if np.iscomplexobj(x) and abs(x.imag) > 0:
+            out.append(fmt_complex(x))
+        else:
+            out.append(fmt_real(x.real))
+
+    print(msg + ", ".join(out))
 
 def feedback_ff(G, K, Kff):
     if isinstance(G, (int, float, np.number)):
@@ -1090,12 +1186,12 @@ def feedback_ff(G, K, Kff):
         raise TypeError("K must be a scalar, TransferFunction, or StateSpace")
 
     NG, DG = ct.tfdata(G)
-    NG = np.squeeze(NG)
-    DG = np.squeeze(DG)
+    NG = np.atleast_1d(np.squeeze(NG))
+    DG = np.atleast_1d(np.squeeze(DG))
 
     NC, DC = ct.tfdata(K)
-    NC = np.squeeze(NC)
-    DC = np.squeeze(DC)
+    NC = np.atleast_1d(np.squeeze(NC))
+    DC = np.atleast_1d(np.squeeze(DC))
 
     NGDC = np.convolve(NG, DC)
     NGNC = np.convolve(NG, NC)
@@ -1119,8 +1215,8 @@ def writeGc(filename, Gc):
     ps = [float(np.real(p)) for p in Gc.poles()]
 
     num, den = ct.tfdata(Gc)
-    num = np.squeeze(num)
-    den = np.squeeze(den)
+    num = np.atleast_1d(np.squeeze(num))
+    den = np.atleast_1d(np.squeeze(den))
 
     gain = float(num[0] / den[0]) if (len(num) and len(den)) else 0.0
 
@@ -1142,7 +1238,7 @@ def round_constants(expr, ndigits=3):
 ######################################################   
 # TF helpers
 ######################################################
-def write_latex_array(X, filename, msgs=None, cols=1, tol=1e-12, decimals=2):
+def write_latex_array(X, filename, msgs=None, cols=1, tol=1e-12, decimals=None, sigfigs=None):
     """
     Write a list/array of (possibly complex) numbers to a LaTeX array
     that can be \\input{} directly.
@@ -1160,16 +1256,61 @@ def write_latex_array(X, filename, msgs=None, cols=1, tol=1e-12, decimals=2):
     tol : float
         Imaginary-part tolerance for treating numbers as real
     """
-    def fmt(x):
-        xr = np.real(x)
-        xi = np.imag(x)
-        if abs(xi) < tol:
-            return f"{xr:.{decimals}f}"
-        else:
-            sign = "+" if xi >= 0 else "-"
-            return f"({xr:.{decimals}f} {sign} {abs(xi):.{decimals}f}i)"
 
-    entries = [fmt(x) for x in X]
+    # accept sigfigs as alias for decimals
+    if decimals is None and sigfigs is None:
+        decimals = 2   # default
+    elif decimals is None:
+        decimals = sigfigs
+    elif sigfigs is None:
+        pass
+    else:
+        if decimals != sigfigs:
+            raise ValueError("decimals and sigfigs must match if both are given")
+
+    X = np.atleast_1d(X).astype(complex)
+
+    used = np.zeros(len(X), dtype=bool)
+    entries = []
+
+    def fmt_real(x):
+        return f"{x:.{decimals}f}"
+
+    for i, z in enumerate(X):
+        if used[i]:
+            continue
+
+        zr, zi = z.real, z.imag
+
+        # try to find conjugate
+        paired = False
+        if abs(zi) > tol:
+            for j in range(i + 1, len(X)):
+                if used[j]:
+                    continue
+                zj = X[j]
+                if (abs(zj.real - zr) < tol and
+                    abs(zj.imag + zi) < tol):
+                    # conjugate pair found
+                    entries.append(
+                        rf"({fmt_real(zr)} \pm {fmt_real(abs(zi))}i)"
+                    )
+                    used[i] = used[j] = True
+                    paired = True
+                    break
+
+        if paired:
+            continue
+
+        # no conjugate pair
+        if abs(zi) < tol:
+            entries.append(fmt_real(zr))
+        else:
+            sign = "+" if zi >= 0 else "-"
+            entries.append(
+                rf"({fmt_real(zr)} {sign} {fmt_real(abs(zi))}i)"
+            )
+        used[i] = True
 
     # split into rows
     rows = [
@@ -1179,7 +1320,8 @@ def write_latex_array(X, filename, msgs=None, cols=1, tol=1e-12, decimals=2):
 
     with open(filename, "w") as f:
         f.write("\\begin{array}{%s}\n" % ("c" * cols))
-        f.write(msgs)
+        if msgs:
+            f.write(msgs + "\n")
         for r in rows:
             f.write("  " + " & ".join(r) + " \\\\\n")
         f.write("\\end{array}\n")
@@ -1199,14 +1341,13 @@ def show_tf_latex(P, label=None, sigfigs=2, show=None, factor=False, name=None):
         label = name
 
     num, den = ct.tfdata(P)
-    num = np.squeeze(num)
-    den = np.squeeze(den)
+    num = np.atleast_1d(np.squeeze(num))
+    den = np.atleast_1d(np.squeeze(den))
 
     if factor:
         Kn, rnum, qnum = factor_poly_real(num)
         Kd, rden, qden = factor_poly_real(den)
 
-        # cancel common real roots
         rnum_c, rden_c = cancel_common_real_roots(rnum, rden)
 
         num_body = factors_to_latex(rnum_c, qnum, var, sigfigs)
@@ -1215,18 +1356,18 @@ def show_tf_latex(P, label=None, sigfigs=2, show=None, factor=False, name=None):
         frac = build_frac_latex_gain_in_numer(Kn, num_body, Kd, den_body, sigfigs)
 
     else:
-        # polynomial (unfactored) form
+        # polynomial (unfactored) form — mathtext safe
         num_tex = _poly_to_latex(num, sigfigs=sigfigs, var=var, discrete=False)
         den_tex = _poly_to_latex(den, sigfigs=sigfigs, var=var, discrete=False)
-        frac = rf"\displaystyle \frac{{{num_tex}}}{{{den_tex}}}"
+        frac = rf"\frac{{{num_tex}}}{{{den_tex}}}"
 
-    msgs = Math(label + " = " + frac)
+    latex_str = rf"${label} = {frac}$"
 
     if show:
-        display(msgs)
+        display(Math(latex_str))
+        return None
 
-    return msgs
-
+    return latex_str
 
 def _num_to_latex(x, sigfigs=4):
     """
@@ -1249,59 +1390,13 @@ def _sci_to_latex(s):
         return rf"{base} \times 10^{{{int(exp)}}}"
     return s
 
-def _poly_to_latex(coefs, sigfigs=4, var="s", discrete=False):
-    terms = []
-    n = len(coefs)
-
-    for i, val in enumerate(coefs):
-
-        if abs(val) < 1e-12:
-            continue
-
-        # sign and magnitude
-        sign = "-" if val < 0 else "+"
-        mag = abs(val)
-
-        # format once to significant figures
-        coeff_str = f"{mag:.{sigfigs}g}"
-        coeff_str = _sci_to_latex(coeff_str)
-
-        if discrete:
-            power = i
-            if power == 0:
-                term_body = coeff_str
-            else:
-                term_body = rf"{'' if coeff_str == '1' else coeff_str}{var}^{{-{power}}}"
-        else:
-            degree = n - 1 - i
-            if degree > 1:
-                term_body = rf"{'' if coeff_str == '1' else coeff_str}{var}^{degree}"
-            elif degree == 1:
-                term_body = rf"{'' if coeff_str == '1' else coeff_str}{var}"
-            else:
-                term_body = coeff_str
-
-        terms.append((sign, term_body))
-
-    if not terms:
-        return "0"
-
-    # first term: suppress leading '+'
-    first_sign, first_term = terms[0]
-    result = ("" if first_sign == "+" else "-") + first_term
-
-    for sign, term in terms[1:]:
-        result += f" {sign} {term}"
-
-    return result
-
 def tf_to_latex(G):
     s = sp.Symbol('s')
     
     # Get numerator and denominator coefficients
     num, den = ct.tfdata(G)
-    num = np.squeeze(num)
-    den = np.squeeze(den)
+    num = np.atleast_1d(np.squeeze(num))
+    den = np.atleast_1d(np.squeeze(den))
 
     # Convert to symbolic expressions
     num_poly = sum(np.round(coef,2) * s**i for i, coef in enumerate(reversed(num)))
@@ -1425,18 +1520,18 @@ def build_frac_latex(Kn, num_body, Kd, den_body, sigfigs=4, tol=1e-8):
         return rf"\displaystyle {fmt(K, sigfigs)}\,{num_body}"
 
     if num_body is None:
-        return rf"\displaystyle {fmt(K, sigfigs)}\,\frac{{1}}{{{den_body}}}"
+        return rf"\displaystyle {fmt(K, sigfigs)}\,\dfrac{{1}}{{{den_body}}}"
 
     if abs(K - 1) < tol:
-        return rf"\displaystyle \frac{{{num_body}}}{{{den_body}}}"
+        return rf"\displaystyle \dfrac{{{num_body}}}{{{den_body}}}"
 
-    return rf"\displaystyle {fmt(K)}\,\frac{{{num_body}}}{{{den_body}}}"
+    return rf"\displaystyle {fmt(K)}\,\dfrac{{{num_body}}}{{{den_body}}}"
 
 def factors_to_latex(real_roots, quads, var="s", sigfigs=4, tol=1e-8):
     #fmt = lambda x: np.format_float_positional(x, precision=sigfigs, trim='-')
     parts = []
 
-    for r in sorted(real_roots):
+    for r in real_roots:
         a = -r
         if abs(a) < tol:
             parts.append(var)
@@ -1531,19 +1626,19 @@ def build_fraction_latex_from_roots(K_num, roots_num, K_den, roots_den,
 
     if nb is None:
         if abs(K_total - 1) < Tol:
-            return rf"\displaystyle \frac{{1}}{{{db}}}"
+            return rf"\displaystyle \dfrac{{1}}{{{db}}}"
         elif abs(K_total + 1) < Tol:
-            return rf"\displaystyle -\frac{{1}}{{{db}}}"
+            return rf"\displaystyle -\dfrac{{1}}{{{db}}}"
         else:
-            return rf"\displaystyle {K_tex}\,\frac{{1}}{{{db}}}"
+            return rf"\displaystyle {K_tex}\,\dfrac{{1}}{{{db}}}"
 
     # both present
     if abs(K_total - 1) < Tol:
-        return rf"\displaystyle \frac{{{nb}}}{{{db}}}"
+        return rf"\displaystyle \dfrac{{{nb}}}{{{db}}}"
     elif abs(K_total + 1) < Tol:
-        return rf"\displaystyle -\frac{{{nb}}}{{{db}}}"
+        return rf"\displaystyle -\dfrac{{{nb}}}{{{db}}}"
     else:
-        return rf"\displaystyle {K_tex}\,\frac{{{nb}}}{{{db}}}"
+        return rf"\displaystyle {K_tex}\,\dfrac{{{nb}}}{{{db}}}"
 
 
 def cancel_common_real_roots(rnum, rden, tol=1e-6):
@@ -1572,12 +1667,11 @@ def build_frac_latex_gain_in_numer(Kn, num_body, Kd, den_body, sigfigs=4, Tol=1e
         (Kn/Kd) * (num_body / den_body)
     with the net gain placed INSIDE the numerator.
 
-    Rules:
-      - gain appears exactly once
-      - num_body or den_body == "1" is suppressed
-      - K≈1 omitted, K≈-1 shown as minus sign
+    Mathtext-safe version:
+      - no \\displaystyle
+      - no \\dfrac
+      - suitable for Matplotlib and notebooks
     """
-    #fmt = lambda x: np.format_float_positional(float(x), precision=sigfigs, trim='-')
 
     def clean(body):
         if body is None:
@@ -1596,43 +1690,134 @@ def build_frac_latex_gain_in_numer(Kn, num_body, Kd, den_body, sigfigs=4, Tol=1e
 
     # pure scalar
     if nb is None and db is None:
-        return rf"\displaystyle {Ktex}"
+        return rf"{Ktex}"
 
     # numerator only
     if db is None:
         if abs(K - 1) < Tol:
-            return rf"\displaystyle {nb}"
+            return rf"{nb}"
         elif abs(K + 1) < Tol:
-            return rf"\displaystyle -{nb}"
+            return rf"-{nb}"
         else:
-            return rf"\displaystyle {Ktex}\,{nb}"
+            return rf"{Ktex}\,{nb}"
 
     # denominator only
     if nb is None:
         if abs(K - 1) < Tol:
-            return rf"\displaystyle \frac{{1}}{{{db}}}"
+            return rf"\frac{{1}}{{{db}}}"
         elif abs(K + 1) < Tol:
-            return rf"\displaystyle -\frac{{1}}{{{db}}}"
+            return rf"-\frac{{1}}{{{db}}}"
         else:
-            return rf"\displaystyle \frac{{{Ktex}}}{{{db}}}"
+            return rf"\frac{{{Ktex}}}{{{db}}}"
 
     # full fraction
     if abs(K - 1) < Tol:
-        return rf"\displaystyle \frac{{{nb}}}{{{db}}}"
+        return rf"\frac{{{nb}}}{{{db}}}"
     elif abs(K + 1) < Tol:
-        return rf"\displaystyle -\frac{{{nb}}}{{{db}}}"
+        return rf"-\frac{{{nb}}}{{{db}}}"
     else:
-        return rf"\displaystyle \frac{{{Ktex}\,{nb}}}{{{db}}}"
+        return rf"\frac{{{Ktex}\,{nb}}}{{{db}}}"
+
+def group_real_roots(real_roots, tol=1e-6):
+    groups = []
+    for r in real_roots:
+        for g in groups:
+            if abs(r - g[0]) < tol:
+                g.append(r)
+                break
+        else:
+            groups.append([r])
+    return groups
+
+def poly_factors_to_latex(K, real_roots, quads, sigfigs=4):
+    terms = []
+
+    # real roots
+    for g in group_real_roots(real_roots):
+        r = g[0]
+        mult = len(g)
+        a = -r
+        term = f"(s {'+' if a >= 0 else '-'} {abs(a):.{sigfigs}g})"
+        if mult > 1:
+            term += f"^{mult}"
+        terms.append(term)
+
+    # quadratic factors
+    for B, C in quads:
+        terms.append(
+            f"(s^2 + {B:.{sigfigs}g}s + {C:.{sigfigs}g})"
+        )
+
+    # no factors → return empty string, not "1"
+    body = "".join(terms)
+
+    # only include K if it is not 1
+    if abs(K - 1.0) > 1e-12:
+        return f"{K:.{sigfigs}g}" + body
+
+    return body
+
+def _poly_to_latex(coefs, sigfigs=4, var="s", discrete=False):
+    terms = []
+    n = len(coefs)
+
+    for i, val in enumerate(coefs):
+
+        if abs(val) < 1e-12:
+            continue
+
+        # sign and magnitude
+        sign = "-" if val < 0 else "+"
+        mag = abs(val)
+
+        # format once to significant figures
+        coeff_str = f"{mag:.{sigfigs}g}"
+        coeff_str = _sci_to_latex(coeff_str)
+
+        if discrete:
+            power = i
+            if power == 0:
+                term_body = coeff_str
+            else:
+                term_body = rf"{'' if coeff_str == '1' else coeff_str}{var}^{{-{power}}}"
+        else:
+            degree = n - 1 - i
+            if degree > 1:
+                term_body = rf"{'' if coeff_str == '1' else coeff_str}{var}^{degree}"
+            elif degree == 1:
+                term_body = rf"{'' if coeff_str == '1' else coeff_str}{var}"
+            else:
+                term_body = coeff_str
+
+        terms.append((sign, term_body))
+
+    if not terms:
+        return "0"
+
+    # first term: suppress leading '+'
+    first_sign, first_term = terms[0]
+    result = ("" if first_sign == "+" else "-") + first_term
+
+    for sign, term in terms[1:]:
+        result += f" {sign} {term}"
+
+    return result
 
 def factor_poly_real(coeffs, tol=1e-6):
     """
     coeffs: highest to lowest
     returns:
         K          : leading coefficient
-        real_roots : list of real roots
-        quads      : list of (B, C) for s^2 + B s + C
+        real_roots : list of real roots (sorted by increasing |root|)
+        quads      : list of (B, C) for s^2 + B s + C,
+                     sorted by increasing |root|
     """
-    coeffs = np.asarray(coeffs, dtype=float)
+    coeffs = np.atleast_1d(np.asarray(coeffs, dtype=float))
+
+    # constant polynomial
+    if coeffs.size == 1:
+        return coeffs[0], [], []
+
     K = coeffs[0]
     roots = np.roots(coeffs)
 
@@ -1651,7 +1836,7 @@ def factor_poly_real(coeffs, tol=1e-6):
             continue
 
         # otherwise, try to form a conjugate quadratic
-        for j in range(i+1, len(roots)):
+        for j in range(i + 1, len(roots)):
             if not used[j] and abs(roots[j] - np.conj(r)) <= imag_tol:
                 used[i] = used[j] = True
                 a = r.real
@@ -1659,9 +1844,13 @@ def factor_poly_real(coeffs, tol=1e-6):
                 quads.append((-2*a, a*a + b*b))
                 break
 
+    # real roots: sort by magnitude
+    real_roots.sort(key=lambda r: abs(r))
+
+    # quadratic factors: C = |root|^2
+    quads.sort(key=lambda q: q[1])
+
     return K, real_roots, quads
-
-
 
 def pid(Kp = 0, Ki = 0, Kd = 0):
     '''return tf form of a PID controller given Kp,Ki,Kd'''
@@ -1701,19 +1890,39 @@ def write_latex_constants(S0, filename="./figs/constants.tex", idname=None, fmt=
             f.write(r"\def\%s{%s}" % (macro, fmt % val) + "\n")
 
 def write_tf_latex(G, filename, label, sigfigs=4, factor=None):
-    ''' G filename sigfigs'''
-    tex = show_tf_latex(G,sigfigs=sigfigs,factor=factor, show=False)._repr_latex_()
-    tex = tex.strip("$")
+    # extract polynomials robustly
+    num, den = ct.tfdata(G)
+    num = np.squeeze(num)
+    den = np.squeeze(den)
 
-    # remove everything up to the first '='
-    if "=" in tex:
-        tex = tex.split("=", 1)[1].strip()
+    if not factor:
+        # expanded form
+        num_tex = _poly_to_latex(num, sigfigs)
+        den_tex = _poly_to_latex(den, sigfigs)
+        tex = rf"\dfrac{{{num_tex}}}{{{den_tex}}}"
+
+    else:
+        # factored form
+        Kn, rnum, qnum = factor_poly_real(num)
+        Kd, rden, qden = factor_poly_real(den)
+
+        gain = Kn / Kd
+
+        # fold gain into numerator
+        num_fac = poly_factors_to_latex(gain, rnum, qnum, sigfigs)
+        den_fac = poly_factors_to_latex(1.0, rden, qden, sigfigs)
+
+        if num_fac == "":
+            num_fac = f"{gain:.{sigfigs}g}"
+        if den_fac == "":
+            den_fac = "1"
+
+        tex = rf"\dfrac{{{num_fac}}}{{{den_fac}}}"
 
     with open(filename, "w") as f:
         f.write(r"\[" + "\n")
         f.write(label + " = " + tex + "\n")
         f.write(r"\]" + "\n")
-
 
 def normalize_tf(G):
     '''factor out non-unity gain for leading coefficient of the denominator'''
@@ -1721,8 +1930,8 @@ def normalize_tf(G):
         G = ct.ss2tf(G)
 
     num, den = ct.tfdata(G)
-    num = np.squeeze(num)
-    den = np.squeeze(den)
+    num = np.atleast_1d(np.squeeze(num))
+    den = np.atleast_1d(np.squeeze(den))
 
     if den[0] != 0:
         num = num/den[0]
