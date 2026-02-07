@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from typing import List
 from IPython.display import Math
 import scipy.linalg
+from scipy.linalg import solve_continuous_lyapunov, svd, sqrtm, cholesky, eigvals
+from scipy.linalg import eigh # symmetric matrices
 import re
 
 from types import SimpleNamespace
@@ -998,6 +1000,94 @@ def log_interp(zz, xx, yy):
     logy = np.log10(yy)
     return np.power(10.0, np.interp(logz, logx, logy))
 
+def pick_model_order_from_hsvs(sigmas,method="combined",energy_thresh=0.95,error_thresh=None):
+    """
+    Choose truncation order r from sorted HSVs (descending).
+    method: "gap" | "energy" | "error" | "combined"
+    - gap: find the largest ratio sigma_i / sigma_{i+1}
+    - energy: cumulative energy fraction >= energy_thresh
+    - error: choose r such that 2 * sum_{i>r} sigma_i <= error_thresh
+    - combined: prefer gap if large, else energy, else error if provided
+    Returns r (int, number of retained states).
+    """
+    s = np.asarray(sigmas, dtype=float)
+    if s.ndim != 1:
+        s = s.ravel()
+    n = len(s)
+    if n == 0:
+        return 0
+
+    # energy approach
+    total = s.sum()
+    cum = np.cumsum(s)
+    if total == 0:
+        r_energy = 0
+    else:
+        r_energy = int(np.searchsorted(cum / total, energy_thresh) + 1)
+        r_energy = min(max(r_energy, 0), n)
+
+    # gap approach: largest ratio sigma_i / sigma_{i+1}
+    ratios = s[:-1] / (s[1:] + 1e-20)
+    if len(ratios) == 0:
+        r_gap = n
+    else:
+        idx = np.argmax(ratios)
+        # only accept gap if ratio is significant
+        if ratios[idx] > 10:   # heuristic threshold; tune as needed
+            r_gap = idx + 1
+        else:
+            r_gap = None
+
+    # error bound approach
+    if error_thresh is not None:
+        tail_cumsum = np.cumsum(s[::-1])[::-1]  # tail sum from i to end
+        # want smallest r with 2*sum_{i>r} sigma_i <= error_thresh
+        r_err = n
+        for r in range(n+1):
+            tail = tail_cumsum[r] if r < n else 0.0
+            if 2.0 * tail <= error_thresh:
+                r_err = r
+                break
+    else:
+        r_err = None
+
+    if method == "gap":
+        return r_gap if r_gap is not None else r_energy
+    if method == "energy":
+        return r_energy
+    if method == "error":
+        return r_err if r_err is not None else n
+    # combined: prefer gap if found, else energy, else error if small
+    if r_gap is not None:
+        return r_gap
+    if r_energy > 0:
+        return r_energy
+    if r_err is not None:
+        return r_err
+    return n
+
+def hsv(Wc, Wo, tol_chol=1e-12):
+    """
+    Return Hankel singular values robustly from controllability Wc and observability Wo gramians.
+    Tries Cholesky-based method first (more stable), falls back to sqrtm+SVD.
+    """
+    # Try Cholesky-based approach if Wc and Wo are (numerically) SPD
+    try:
+        Rc = cholesky(Wc, lower=False)   # Rc.T @ Rc = Wc
+        Ro = cholesky(Wo, lower=False)
+        # compute SVD of Ro @ Rc.T  (or Rc @ Ro.T) - both give same singular values
+        U, s, Vt = svd(Ro @ Rc.T)
+        return s  # these are the HSVs
+    except Exception:
+        # fallback: sqrtm( Wc ) * Wo * sqrtm(Wc)
+        # use sqrtm then SVD of the symmetric product
+        S = sqrtm(Wc) @ Wo @ sqrtm(Wc)
+        # S should be symmetric; do eig or svd
+        vals = svd(S, compute_uv=False)
+        # eigenvalues may be tiny negative due to numerical noise; clip
+        vals = np.clip(vals, 0.0, None)
+        return np.sqrt(vals)
+
 def balred(G, order = None, DCmatch = False, check = False, method = None, Tol=1e-9):
     '''
     Balanced Model reduction using both methods discussed here
@@ -1009,7 +1099,6 @@ def balred(G, order = None, DCmatch = False, check = False, method = None, Tol=1
 
     order: dim of system to return
     '''
-    from scipy.linalg import solve_continuous_lyapunov, svd
 
     is_ss = isinstance(G, ct.StateSpace) # in SS form already?
     if is_ss:
@@ -1034,48 +1123,57 @@ def balred(G, order = None, DCmatch = False, check = False, method = None, Tol=1
 
     # now operate on the SS model of the trimmed system
     Gss = ct.tf2ss(G_trimmed)
-    if order is None:
-        order = Gss.A.shape[0] - 1
-    order -= number_cut
-    if order <= 0:
-        print("System dimension not correct")
-        return
 
     # check stability
-    evals = scipy.linalg.eigvals(Gss.A)
+    evals = eigvals(Gss.A)
     if np.max(np.real(evals)) > 0:
         print("Algorithm only works for stable systems")
-        return
+        return Gin
 
     Wc = solve_continuous_lyapunov(Gss.A, -Gss.B @ Gss.B.T)
     Wo = solve_continuous_lyapunov(Gss.A.T, -Gss.C.T @ Gss.C)
     Wc = (Wc + Wc.T)/2.0
     Wo = (Wo + Wo.T)/2.0
-    U = np.linalg.cholesky(Wc)
+    L = scipy.linalg.cholesky(Wc, lower=True)
+    hsv_original = hsv(Wc,Wo)
+
+    if order is None: # calc done using trimmed model 
+        #order = Gss.A.shape[0] - 1
+        order = pick_model_order_from_hsvs(hsv_original)
+        print(f"Order not specified - selected {order:3d}")
+    else:
+        order -= number_cut # have already removed some poles
+
+    if order <= 0:
+        print("System dimension not correct")
+        return
 
     if method == 0:
-        Z = np.linalg.cholesky(Wo)
-        W, Sigma, Vh = svd(U.T @ Z)
+        print("Using Method 0")
+        Z = scipy.linalg.cholesky(Wo, lower=True)
+        W, Sigma, Vh = svd(L.T @ Z)
         Sigma_sqrt_inv = np.linalg.inv(np.diag(np.sqrt(Sigma)))
 
         T = Sigma_sqrt_inv @ Vh @ Z.T
-        Ti = U @ W @ Sigma_sqrt_inv
+        Ti = L @ W @ Sigma_sqrt_inv
 
     elif method == 1:
         print("Using Method 1 - not recommended for high-order systems")
-        from scipy.linalg import eigh # symmetric matrices
 
-        eigvals, K = eigh(U.T @ Wo @ U)
-        idx = eigvals.argsort()[::-1]
-        eigvals = eigvals[idx]
+        Eigvals, K = eigh(L.T @ Wo @ L)
+        idx = Eigvals.argsort()[::-1]
+        Eigvals = Eigvals[idx]
         K = K[:, idx]
 
-        Sigma = np.sqrt(eigvals)
+        Sigma = np.sqrt(Eigvals)
         Sigma_inv_sqrt = np.diag([1.0/xx for xx in np.sqrt(Sigma)])
         Sigma_sqrt = np.diag([xx for xx in np.sqrt(Sigma)])
 
-        T  = Sigma_sqrt @ K.T @ np.linalg.inv(U)
-        Ti = U @ K @ Sigma_inv_sqrt
+        T  = Sigma_sqrt @ K.T @ np.linalg.inv(L)
+        Ti = L @ K @ Sigma_inv_sqrt
+    else:
+        print("Method 0 or 1")
+        return Gr
 
     Ab = T @ Gss.A @ Ti
     Bb = T @ Gss.B
@@ -1085,11 +1183,7 @@ def balred(G, order = None, DCmatch = False, check = False, method = None, Tol=1
     Brr = Bb[:order, :]
     Crr = Cb[:, :order]
     Drr = Gss.D
-    Gr = None
-    try:
-        Gr = cmat.StateSpace(Arr, Brr, Crr, Drr)
-    except Exception:
-        Gr = ct.StateSpace(Arr, Brr, Crr, Drr)
+    Gr = ct.StateSpace(Arr, Brr, Crr, Drr)
 
     if DCmatch:
         try:
@@ -1103,15 +1197,10 @@ def balred(G, order = None, DCmatch = False, check = False, method = None, Tol=1
             Brr -= Are @ Aee_inv @ Be
             Crr -= Ce @ Aee_inv @ Aer
             Drr -= Ce @ Aee_inv @ Be
-            Gr = control.matlab.StateSpace(Arr, Brr, Crr, Drr)
+            Gr = ct.StateSpace(Arr, Brr, Crr, Drr)
         except Exception:
+            print("Error in DCmatch step")
             pass
-
-    def hsv(Wc,Wo):
-        from scipy.linalg import sqrtm, svd
-        sqrtWc = sqrtm(Wc)
-        U, S, Vh = svd(sqrtWc @ Wo @ sqrtWc)
-        return np.sqrt(S)           
 
     if check:
         Wc_bal = solve_continuous_lyapunov(Gr.A, -Gr.B @ Gr.B.T)
@@ -1126,12 +1215,10 @@ def balred(G, order = None, DCmatch = False, check = False, method = None, Tol=1
         print(T @ Wc @ T.T)
         print("\nTransformed Wo")
         print(np.linalg.inv(T.T) @Wo @ Ti)
-        print("\nOriginal model HSV: ",hsv(Wc,Wo))
+        print("\nOriginal model HSV: ",hsv_original)
 
     Gr = near_zero(ct.ss2tf(Gr)) * ct.tf([1], [1, 0]) ** number_cut
     return ct.tf2ss(Gr) if is_ss else Gr 
-
-import numpy as np
 
 def pretty_row_print(X,msg="",sigfigs=None,decimals=3,complex_decimals=2):
     """
