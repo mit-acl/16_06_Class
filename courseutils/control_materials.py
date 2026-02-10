@@ -499,8 +499,6 @@ def settling_time(t, y, tol=0.02, t0=0):
         return np.nan  # never settles within simulation time
     return t[last_outside + 1]
 
-import numpy as np
-
 def rise_time(t, y, yss=None, limits=(0.1, 0.9), t0=0.0):
     """
     Robust rise time computation using linear interpolation.
@@ -1099,7 +1097,6 @@ def balred(G, order = None, DCmatch = False, check = False, method = None, Tol=1
 
     order: dim of system to return
     '''
-
     is_ss = isinstance(G, ct.StateSpace) # in SS form already?
     if is_ss:
         Gin = ct.ss2tf(G)
@@ -1120,6 +1117,8 @@ def balred(G, order = None, DCmatch = False, check = False, method = None, Tol=1
     den_trimmed = np.squeeze(den_trimmed)
 
     number_cut = len(den) - len(den_trimmed) # how many poles at origin to add back in
+    if number_cut > 0:
+        print(f"\nNumber of free integrators removed (will be added back in): {number_cut :2d}")
 
     # now operate on the SS model of the trimmed system
     Gss = ct.tf2ss(G_trimmed)
@@ -1137,12 +1136,10 @@ def balred(G, order = None, DCmatch = False, check = False, method = None, Tol=1
     L = scipy.linalg.cholesky(Wc, lower=True)
     hsv_original = hsv(Wc,Wo)
 
-    if order is None: # calc done using trimmed model 
+    if order is None: # following calc done using trimmed model 
         #order = Gss.A.shape[0] - 1
         order = pick_model_order_from_hsvs(hsv_original)
         print(f"Order not specified - selected {order:3d}")
-    else:
-        order -= number_cut # have already removed some poles
 
     if order <= 0:
         print("System dimension not correct")
@@ -1217,8 +1214,12 @@ def balred(G, order = None, DCmatch = False, check = False, method = None, Tol=1
         print(np.linalg.inv(T.T) @Wo @ Ti)
         print("\nOriginal model HSV: ",hsv_original)
 
-    Gr = near_zero(ct.ss2tf(Gr)) * ct.tf([1], [1, 0]) ** number_cut
-    return ct.tf2ss(Gr) if is_ss else Gr 
+    # add integrators back in state space
+    if number_cut > 0:
+        int_ss = ct.tf2ss(ct.tf([1], [1, 0]) ** number_cut)
+        Gr = ct.series(Gr, int_ss) # statespace
+
+    return Gr if is_ss else ct.ss2tf(Gr)
 
 def pretty_row_print(X,msg="",sigfigs=None,decimals=3,complex_decimals=2):
     """
@@ -1615,20 +1616,33 @@ def build_frac_latex(Kn, num_body, Kd, den_body, sigfigs=4, tol=1e-8):
     return rf"\displaystyle {fmt(K)}\,\dfrac{{{num_body}}}{{{den_body}}}"
 
 def factors_to_latex(real_roots, quads, var="s", sigfigs=4, tol=1e-8):
-    #fmt = lambda x: np.format_float_positional(x, precision=sigfigs, trim='-')
     parts = []
 
-    for r in real_roots:
+    # ---- handle real roots ----
+    real_roots = np.asarray(real_roots, dtype=float)
+
+    # count zero roots (integrators)
+    zero_mask = np.abs(real_roots) < tol
+    n_zero = np.sum(zero_mask)
+
+    # nonzero real roots
+    nz_roots = real_roots[~zero_mask]
+
+    # emit integrator factor as s or s^n
+    if n_zero == 1:
+        parts.append(var)
+    elif n_zero > 1:
+        parts.append(f"{var}^{n_zero}")
+
+    # emit remaining real roots
+    for r in nz_roots:
         a = -r
-        if abs(a) < tol:
-            parts.append(var)
-        elif a > 0:
-            #parts.append(f"({var}+{fmt(a)})")
+        if a > 0:
             parts.append(f"({var}+{fmt(a, sigfigs)})")
         else:
-            #parts.append(f"({var}-{fmt(abs(a))})")
             parts.append(f"({var}-{fmt(abs(a), sigfigs)})")
 
+    # ---- handle quadratic factors ----
     for B, C in quads:
         Bs = fmt(B, sigfigs)
         Cs = fmt(C, sigfigs)
