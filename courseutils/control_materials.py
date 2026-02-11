@@ -22,6 +22,7 @@ from IPython.display import Math
 import scipy.linalg
 from scipy.linalg import solve_continuous_lyapunov, svd, sqrtm, cholesky, eigvals
 from scipy.linalg import eigh # symmetric matrices
+from scipy.signal import residue
 import re
 
 from types import SimpleNamespace
@@ -1414,12 +1415,14 @@ def write_latex_array(X, filename, msgs=None, cols=1, tol=1e-12, decimals=None, 
             f.write("  " + " & ".join(r) + " \\\\\n")
         f.write("\\end{array}\n")
 
-def show_tf_latex(P, label=None, sigfigs=2, show=None, factor=False, name=None):
+def show_tf_latex(P, label=None, sigfigs=2, show=None, factor=False,
+                  name=None, time_constant=False):
     ''' 
     P: system
     label
     show
     factor
+    time_constant: if True, normalize first order real factors to (s/a + 1)
     '''
     var = "s"
 
@@ -1438,13 +1441,41 @@ def show_tf_latex(P, label=None, sigfigs=2, show=None, factor=False, name=None):
 
         rnum_c, rden_c = cancel_common_real_roots(rnum, rden)
 
-        num_body = factors_to_latex(rnum_c, qnum, var, sigfigs)
-        den_body = factors_to_latex(rden_c, qden, var, sigfigs)
+        if time_constant:
+            # Normalize first order real factors
+            # (s - r) with r real becomes (s/a + 1) with a = -r
+            # gain multiplied by a
+
+            def normalize_real_roots(rlist):
+                new_roots = []
+                gain_scale = 1.0
+                for r in rlist:
+                    if np.isreal(r):
+                        r = np.real(r)
+                        a = -r
+                        if a != 0:
+                            gain_scale *= a
+                            new_roots.append(-a)  # store as root of (s/a + 1)
+                        else:
+                            new_roots.append(r)
+                    else:
+                        new_roots.append(r)
+                return np.array(new_roots), gain_scale
+
+            rnum_c, scale_num = normalize_real_roots(rnum_c)
+            rden_c, scale_den = normalize_real_roots(rden_c)
+
+            Kn *= scale_num
+            Kd *= scale_den
+
+        num_body = factors_to_latex(rnum_c, qnum, var, sigfigs,
+                                    time_constant=time_constant)
+        den_body = factors_to_latex(rden_c, qden, var, sigfigs,
+                                    time_constant=time_constant)
 
         frac = build_frac_latex_gain_in_numer(Kn, num_body, Kd, den_body, sigfigs)
 
     else:
-        # polynomial (unfactored) form — mathtext safe
         num_tex = _poly_to_latex(num, sigfigs=sigfigs, var=var, discrete=False)
         den_tex = _poly_to_latex(den, sigfigs=sigfigs, var=var, discrete=False)
         frac = rf"\frac{{{num_tex}}}{{{den_tex}}}"
@@ -1615,7 +1646,51 @@ def build_frac_latex(Kn, num_body, Kd, den_body, sigfigs=4, tol=1e-8):
 
     return rf"\displaystyle {fmt(K)}\,\dfrac{{{num_body}}}{{{den_body}}}"
 
-def factors_to_latex(real_roots, quads, var="s", sigfigs=4, tol=1e-8):
+def residue_tf(G, time_constant=False, tol=1e-12):
+    """
+    Partial fraction expansion of transfer function G.
+
+    Standard form:
+        r, a, k  corresponds to  r / (s + a)
+
+    Time constant form:
+        r_tc, a, k  corresponds to  r_tc / (s/a + 1)
+
+        where
+            a = -p
+            r_tc = r / a
+
+        For a stable pole p < 0, a > 0.
+        Integrators (p ≈ 0) are returned as a = 0 and r/s.
+    """
+    num = np.squeeze(G.num)
+    den = np.squeeze(G.den)
+    r, p, k = residue(num, den)
+
+    if not time_constant:
+        return r, p, k
+
+    r_tc = []
+    a_vals = []
+    for ri, pi in zip(r, p):
+        # integrator
+        if abs(pi) < tol:
+            r_tc.append(ri)
+            a_vals.append(0.0)
+            continue
+
+        a = -pi            # define break frequency
+        r_new = ri / a     # rescale residue
+
+        r_tc.append(r_new)
+        a_vals.append(a)
+
+    return np.array(r_tc), np.array(a_vals), k
+
+def factors_to_latex(real_roots, quads, var="s",
+                     sigfigs=4, tol=1e-8,
+                     time_constant=False):
+
     parts = []
 
     # ---- handle real roots ----
@@ -1637,10 +1712,23 @@ def factors_to_latex(real_roots, quads, var="s", sigfigs=4, tol=1e-8):
     # emit remaining real roots
     for r in nz_roots:
         a = -r
-        if a > 0:
-            parts.append(f"({var}+{fmt(a, sigfigs)})")
+
+        if time_constant and abs(a) > tol:
+            # render (s/a + 1)
+            a_fmt = fmt(abs(a), sigfigs)
+
+            if a > 0:
+                parts.append(rf"\left(\frac{{{var}}}{{{a_fmt}}}+1\right)")
+            else:
+                # unstable pole, keep sign inside denominator
+                parts.append(rf"\left(\frac{{{var}}}{{{a_fmt}}}-1\right)")
+
         else:
-            parts.append(f"({var}-{fmt(abs(a), sigfigs)})")
+            # standard (s + a) form
+            if a > 0:
+                parts.append(f"({var}+{fmt(a, sigfigs)})")
+            else:
+                parts.append(f"({var}-{fmt(abs(a), sigfigs)})")
 
     # ---- handle quadratic factors ----
     for B, C in quads:
