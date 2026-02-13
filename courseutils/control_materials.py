@@ -1668,7 +1668,7 @@ def residue_tf(G, time_constant=False, tol=1e-12):
     r, p, k = residue(num, den)
 
     if not time_constant:
-        return r, p, k
+        return r, -p, k
 
     r_tc = []
     a_vals = []
