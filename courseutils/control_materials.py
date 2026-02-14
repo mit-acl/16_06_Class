@@ -1487,7 +1487,7 @@ def show_tf_latex(P, label=None, sigfigs=2, show=None, factor=False,
     else:
         num_tex = _poly_to_latex(num, sigfigs=sigfigs, var=var, discrete=False)
         den_tex = _poly_to_latex(den, sigfigs=sigfigs, var=var, discrete=False)
-        frac = rf"\frac{{{num_tex}}}{{{den_tex}}}"
+        frac = rf"\dfrac{{{num_tex}}}{{{den_tex}}}"
 
     latex_str = rf"${label} = {frac}$"
 
@@ -1696,48 +1696,55 @@ def residue_tf(G, time_constant=False, tol=1e-12):
 
     return np.array(r_tc), np.array(a_vals), k
 
-def factors_to_latex(real_roots, quads, var="s",
-                     sigfigs=4, tol=1e-8,
-                     time_constant=False):
+def factors_to_latex(real_roots, quads, var="s",sigfigs=4, tol=1e-8,time_constant=False):
 
     parts = []
 
     # ---- handle real roots ----
     real_roots = np.asarray(real_roots, dtype=float)
 
-    # count zero roots (integrators)
+    # count zero roots separately (integrators)
     zero_mask = np.abs(real_roots) < tol
     n_zero = np.sum(zero_mask)
 
-    # nonzero real roots
-    nz_roots = real_roots[~zero_mask]
-
-    # emit integrator factor as s or s^n
+    # emit integrator factor
     if n_zero == 1:
         parts.append(var)
     elif n_zero > 1:
         parts.append(f"{var}^{n_zero}")
 
-    # emit remaining real roots
-    for r in nz_roots:
-        a = -r
+    # nonzero real roots
+    nz_roots = real_roots[~zero_mask]
 
-        if time_constant and abs(a) > tol:
-            # render (s/a + 1)
-            a_fmt = fmt(abs(a), sigfigs)
+    if len(nz_roots) > 0:
+        # round to avoid floating point duplicates
+        nz_roots = np.round(nz_roots, sigfigs)
 
-            if a > 0:
-                parts.append(rf"\left(\frac{{{var}}}{{{a_fmt}}}+1\right)")
+        unique_roots, counts = np.unique(nz_roots, return_counts=True)
+
+        for r, mult in zip(unique_roots, counts):
+
+            a = -r  # since factor is (s - r) = (s + a)
+
+            if time_constant and abs(a) > tol:
+                a_fmt = fmt(abs(a), sigfigs)
+
+                if a > 0:
+                    factor = rf"\left(\frac{{{var}}}{{{a_fmt}}}+1\right)"
+                else:
+                    factor = rf"\left(\frac{{{var}}}{{{a_fmt}}}-1\right)"
+
             else:
-                # unstable pole, keep sign inside denominator
-                parts.append(rf"\left(\frac{{{var}}}{{{a_fmt}}}-1\right)")
+                if a > 0:
+                    factor = f"({var}+{fmt(a, sigfigs)})"
+                else:
+                    factor = f"({var}-{fmt(abs(a), sigfigs)})"
 
-        else:
-            # standard (s + a) form
-            if a > 0:
-                parts.append(f"({var}+{fmt(a, sigfigs)})")
-            else:
-                parts.append(f"({var}-{fmt(abs(a), sigfigs)})")
+            # attach exponent if repeated
+            if mult > 1:
+                factor += f"^{mult}"
+
+            parts.append(factor)
 
     # ---- handle quadratic factors ----
     for B, C in quads:
@@ -1969,13 +1976,11 @@ def _poly_to_latex(coefs, sigfigs=4, var="s", discrete=False, Tol = 1e-12):
     terms = []
 
     coefs = np.atleast_1d(coefs).astype(float)
-    print(coefs)
 
     # Trim leading near-zero coefficients
     while len(coefs) > 1 and abs(coefs[0]) < Tol:
         coefs = coefs[1:]
 
-    print(coefs)
     n = len(coefs)
 
     for i, val in enumerate(coefs):
