@@ -2142,7 +2142,7 @@ def write_tf_latex(G, filename, label, sigfigs=4, factor=None):
         if den_fac == "":
             den_fac = "1"
 
-        tex = rf"\dfrac{{{num_fac}}}{{{den_fac}}}"
+        tex = rf"\displaystyle \frac{{{num_fac}}}{{{den_fac}}}"
 
     with open(filename, "w") as f:
         f.write(r"\[" + "\n")
