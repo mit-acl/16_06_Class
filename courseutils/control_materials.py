@@ -1229,8 +1229,8 @@ def pretty_row_print(X,msg="",sigfigs=None,decimals=3,complex_decimals=2):
     Exactly one of sigfigs or decimals should be used.
     """
 
-    if sigfigs is not None and decimals is not None:
-        raise ValueError("Use either sigfigs or decimals, not both")
+    if sigfigs is not None:
+        decimals = None 
 
     # normalize scalar to 1 element array
     X = np.atleast_1d(X)
@@ -1327,6 +1327,15 @@ def round_constants(expr, ndigits=3):
 ######################################################   
 # TF helpers
 ######################################################
+def write_two_column_array(col1, col2, filename, sigfigs=4, title1='Residue',title2='Poles'):
+    with open(filename, "w") as f:
+        f.write("\\begin{array}{cc}\n")
+        f.write(title1+" & "+title2+" \\\\\n")
+        for a, b in zip(col1, col2):
+            f.write(f"{a:.{sigfigs}f} & {b:.{sigfigs}f} \\\\\n")
+        f.write("\\end{array}\n")
+
+
 def write_latex_array(X, filename, msgs=None, cols=1, tol=1e-12, decimals=None, sigfigs=None):
     """
     Write a list/array of (possibly complex) numbers to a LaTeX array
@@ -1925,6 +1934,16 @@ def poly_factors_to_latex(K, real_roots, quads, sigfigs=4):
     for g in group_real_roots(real_roots):
         r = g[0]
         mult = len(g)
+
+        # ---- HANDLE ZERO ROOT CLEANLY ----
+        if abs(r) < 1e-12:
+            term = "s"
+            if mult > 1:
+                term += f"^{mult}"
+            terms.append(term)
+            continue
+        # -----------------------------------
+
         a = -r
         term = f"(s {'+' if a >= 0 else '-'} {abs(a):.{sigfigs}g})"
         if mult > 1:
@@ -1946,8 +1965,17 @@ def poly_factors_to_latex(K, real_roots, quads, sigfigs=4):
 
     return body
 
-def _poly_to_latex(coefs, sigfigs=4, var="s", discrete=False):
+def _poly_to_latex(coefs, sigfigs=4, var="s", discrete=False, Tol = 1e-12):
     terms = []
+
+    coefs = np.atleast_1d(coefs).astype(float)
+    print(coefs)
+
+    # Trim leading near-zero coefficients
+    while len(coefs) > 1 and abs(coefs[0]) < Tol:
+        coefs = coefs[1:]
+
+    print(coefs)
     n = len(coefs)
 
     for i, val in enumerate(coefs):
@@ -2094,6 +2122,9 @@ def write_tf_latex(G, filename, label, sigfigs=4, factor=None):
         # factored form
         Kn, rnum, qnum = factor_poly_real(num)
         Kd, rden, qden = factor_poly_real(den)
+
+        # Cancel common real roots (same as show_tf_latex)
+        rnum, rden = cancel_common_real_roots(rnum, rden)
 
         gain = Kn / Kd
 
