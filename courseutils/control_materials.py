@@ -285,8 +285,7 @@ def Root_Locus_design_cancel(G, s_target=complex(-1, 2), s_cancel=-1, verbose=Fa
     phi_fromG = float(np.atleast_1d(phi_fromG)[0])
 
     # phase from cancelling zero
-    phi_from_Gc_zero = sum(cmath.phase(s_target - z) for z in np.atleast_1d(np.real(s_cancel))) * r2d
-    phi_from_Gc_zero = float(phi_from_Gc_zero)
+    phi_from_Gc_zero = float(sum(cmath.phase(s_target - z) for z in np.atleast_1d(np.real(s_cancel))) * r2d)
 
     # required phase to satisfy angle condition
     phi_required = -wrap_phase_neg(-180.0 - (phi_fromG + phi_from_Gc_zero))
@@ -2111,7 +2110,7 @@ def write_latex_constants(S0, filename="./figs/constants.tex", idname=None, fmt=
             macro = sanitize_letters(name) + suffix
             f.write(r"\def\%s{%s}" % (macro, fmt % val) + "\n")
 
-def write_tf_latex(G, filename, label, sigfigs=4, factor=None):
+def write_tf_latex(G, filename, label, sigfigs=4, factor=None, inline=None):
     # extract polynomials robustly
     num, den = ct.tfdata(G)
     num = np.squeeze(num)
@@ -2145,9 +2144,14 @@ def write_tf_latex(G, filename, label, sigfigs=4, factor=None):
         tex = rf"\displaystyle \frac{{{num_fac}}}{{{den_fac}}}"
 
     with open(filename, "w") as f:
-        f.write(r"\[" + "\n")
-        f.write(label + " = " + tex + "\n")
-        f.write(r"\]" + "\n")
+        if inline is True:
+            f.write(r"$" + "\n")
+            f.write(label + " = " + tex + "\n")
+            f.write(r"$" + "\n")
+        else:
+            f.write(r"\[" + "\n")
+            f.write(label + " = " + tex + "\n")
+            f.write(r"\]" + "\n")
 
 def normalize_tf(G):
     '''factor out non-unity gain for leading coefficient of the denominator'''
