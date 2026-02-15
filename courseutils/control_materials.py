@@ -731,6 +731,21 @@ def find_Kv(L):
 def find_Ka(L):
     return static_error_constant(L, order = 2)
 
+def hf_gain(G):
+    num, den = ct.tfdata(G)
+    num = np.atleast_1d(np.squeeze(num))
+    den = np.atleast_1d(np.squeeze(den))
+
+    deg_num = len(num) - 1
+    deg_den = len(den) - 1
+
+    if deg_num < deg_den:
+        return 0.0
+    elif deg_num > deg_den:
+        return np.inf
+    else:
+        return num[0] / den[0]
+
 def _eval_Gjw(G, omega):
     '''Handle the different formats that a system model might be given'''
     if isinstance(G, (ct.TransferFunction, ct.StateSpace)):
@@ -2035,7 +2050,6 @@ def factor_poly_real(coeffs, tol=1e-6):
     """
     coeffs = np.atleast_1d(np.asarray(coeffs, dtype=float))
 
-    # constant polynomial
     if coeffs.size == 1:
         return coeffs[0], [], []
 
@@ -2051,12 +2065,12 @@ def factor_poly_real(coeffs, tol=1e-6):
             continue
 
         imag_tol = tol * (1.0 + abs(r.real))
+
         if abs(r.imag) <= imag_tol:
             real_roots.append(r.real)
             used[i] = True
             continue
 
-        # otherwise, try to form a conjugate quadratic
         for j in range(i + 1, len(roots)):
             if not used[j] and abs(roots[j] - np.conj(r)) <= imag_tol:
                 used[i] = used[j] = True
@@ -2065,10 +2079,27 @@ def factor_poly_real(coeffs, tol=1e-6):
                 quads.append((-2*a, a*a + b*b))
                 break
 
-    # real roots: sort by magnitude
+    # -------- NEW: cluster real roots --------
+    real_roots.sort()
+    clustered = []
+
+    for r in real_roots:
+        if not clustered:
+            clustered.append([r, 1])
+        else:
+            if abs(r - clustered[-1][0]) <= tol:
+                clustered[-1][1] += 1
+            else:
+                clustered.append([r, 1])
+
+    # convert back to list with multiplicity
+    real_roots = []
+    for r, mult in clustered:
+        real_roots.extend([r]*mult)
+
+    # sort by magnitude
     real_roots.sort(key=lambda r: abs(r))
 
-    # quadratic factors: C = |root|^2
     quads.sort(key=lambda q: q[1])
 
     return K, real_roots, quads
@@ -2111,28 +2142,41 @@ def write_latex_constants(S0, filename="./figs/constants.tex", idname=None, fmt=
             f.write(r"\def\%s{%s}" % (macro, fmt % val) + "\n")
 
 def write_tf_latex(G, filename, label, sigfigs=4, factor=None, inline=None):
-    # extract polynomials robustly
     num, den = ct.tfdata(G)
     num = np.squeeze(num)
     den = np.squeeze(den)
 
     if not factor:
-        # expanded form
         num_tex = _poly_to_latex(num, sigfigs)
         den_tex = _poly_to_latex(den, sigfigs)
         tex = rf"\dfrac{{{num_tex}}}{{{den_tex}}}"
 
     else:
-        # factored form
         Kn, rnum, qnum = factor_poly_real(num)
         Kd, rden, qden = factor_poly_real(den)
 
-        # Cancel common real roots (same as show_tf_latex)
+        # cancel common real roots
         rnum, rden = cancel_common_real_roots(rnum, rden)
+
+        # ---- FIX: recluster real roots after cancellation ----
+        def cluster(roots, tol=1e-5):
+            if not roots:
+                return roots
+            roots = sorted(roots)
+            clustered = [roots[0]]
+            for r in roots[1:]:
+                if abs(r - clustered[-1]) < tol:
+                    clustered.append(clustered[-1])  # force exact equality
+                else:
+                    clustered.append(r)
+            return clustered
+
+        rnum = cluster(rnum)
+        rden = cluster(rden)
+        # ------------------------------------------------------
 
         gain = Kn / Kd
 
-        # fold gain into numerator
         num_fac = poly_factors_to_latex(gain, rnum, qnum, sigfigs)
         den_fac = poly_factors_to_latex(1.0, rden, qden, sigfigs)
 
@@ -2145,13 +2189,13 @@ def write_tf_latex(G, filename, label, sigfigs=4, factor=None, inline=None):
 
     with open(filename, "w") as f:
         if inline is True:
-            f.write(r"$" + "\n")
+            f.write("$\n")
             f.write(label + " = " + tex + "\n")
-            f.write(r"$" + "\n")
+            f.write("$\n")
         else:
-            f.write(r"\[" + "\n")
+            f.write("\\[\n")
             f.write(label + " = " + tex + "\n")
-            f.write(r"\]" + "\n")
+            f.write("\\]\n")
 
 def normalize_tf(G):
     '''factor out non-unity gain for leading coefficient of the denominator'''
@@ -2293,3 +2337,41 @@ def legend_best_combined(ax, candidates=None,
         leg.remove()
 
     return ax.legend(loc=best_loc, **legend_kwargs)
+
+def plot_spec_region(ax, zeta, wn, wd, color='m', highlight_color='r', linestyle='--'):
+    """
+    Draws the damping/angle spec lines used in your plots, but using the
+    current axis limits (no magic 20). Works for both full and zoomed axes.
+    """
+    # angle from geometry
+    th = np.arctan2(wd, (zeta*wn))
+
+    # current axis bounds
+    xmin, xmax = ax.get_xlim()
+    ymin, ymax = ax.get_ylim()
+
+    # vertical damping line at real = -zeta*wn, extend it to the full vertical axis
+    x_vert = -zeta * wn
+    ax.plot([x_vert, x_vert], [ymin, ymax], color=color, linestyle=linestyle)
+
+    # Angled lines: these were originally y = -x * tan(th) (so they pass through origin).
+    # Build a line from left axis limit to the damping vertical line.
+    x_line = np.array([xmin, x_vert])
+    y_line = -x_line * np.tan(th)   # y = -x * tan(th)
+    ax.plot(x_line, y_line, color=color, linestyle=linestyle)
+    ax.plot(x_line, -y_line, color=color, linestyle=linestyle)  # symmetric lower branch
+
+    # Short connectors from origin to damping line (0 -> -zeta*wn)
+    x_conn = np.array([0.0, x_vert])
+    y_conn = -x_conn * np.tan(th)
+    ax.plot(x_conn, y_conn, color=color, linestyle=linestyle)
+    ax.plot(x_conn, -y_conn, color=color, linestyle=linestyle)
+
+    # Now draw the solid highlight (same geometry as above but solid and only the local segment)
+    # Use the mph segment limited to the local spec (i.e., -wd..wd around the damping vertical)
+    ax.plot([x_vert, x_vert], [-wd, wd], color=highlight_color, linestyle='-')
+
+    # solid angled highlight between xmin and x_vert, but clip to visible y-range so we don't overdraw
+    y_line_high = -x_line * np.tan(th)
+    ax.plot(x_line, y_line_high, color=highlight_color, linestyle='-')
+    ax.plot(x_line, -y_line_high, color=highlight_color, linestyle='-')
