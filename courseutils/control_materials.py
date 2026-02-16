@@ -1447,8 +1447,10 @@ def show_tf_latex(P, label=None, sigfigs=2, show=None, factor=False,
     factor
     time_constant: if True, normalize first order real factors to (s/a + 1)
     '''
-    var = "s"
 
+    is_discrete = P.dt is not None and P.dt > 0
+    var = "z" if is_discrete else "s"
+    
     if label is None:
         label = f"G({var})"
     if name is not None:
@@ -1499,8 +1501,8 @@ def show_tf_latex(P, label=None, sigfigs=2, show=None, factor=False,
         frac = build_frac_latex_gain_in_numer(Kn, num_body, Kd, den_body, sigfigs)
 
     else:
-        num_tex = _poly_to_latex(num, sigfigs=sigfigs, var=var, discrete=False)
-        den_tex = _poly_to_latex(den, sigfigs=sigfigs, var=var, discrete=False)
+        num_tex = _poly_to_latex(num, sigfigs=sigfigs, var=var, discrete=is_discrete)
+        den_tex = _poly_to_latex(den, sigfigs=sigfigs, var=var, discrete=is_discrete)
         frac = rf"\dfrac{{{num_tex}}}{{{den_tex}}}"
 
     latex_str = rf"${label} = {frac}$"
