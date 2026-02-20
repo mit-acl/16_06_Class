@@ -955,7 +955,7 @@ def color_rl(ax, ms=8, lw=1.5):
 def Read_data(file_name, comments=["#", "F"], cols=[0]):
     return np.loadtxt(file_name, comments=comments, delimiter=",", usecols=cols)
 
-def add_break_info(ax, break_info, dim=None, tol=1e-6):
+def add_break_info(ax, break_info, dim=None, tol=1e-6, delta=None, sigfigs=3):
     '''Add the root locus break in/out info to the plot
     inputs:
     ax: plot
@@ -963,10 +963,18 @@ def add_break_info(ax, break_info, dim=None, tol=1e-6):
     dim: plot size
     tol: 
     '''
+    if delta is None:
+        # default relative offsets
+        xrel = 0.05
+        yrel = 0.1
+    else:
+        xrel, yrel = delta
+
     ymin, ymax = ax.get_ylim()
-    ydelta = (ymax - ymin) / 10.0
     xmin, xmax = ax.get_xlim()
-    xdelta = xmin + 0.05 * (xmax - xmin)
+
+    xdelta = xmin + xrel * (xmax - xmin)
+    ydelta = ymin + yrel * (ymax - ymin)
 
     if dim is None:
         dim = float(ymax)
@@ -985,14 +993,11 @@ def add_break_info(ax, break_info, dim=None, tol=1e-6):
                 unique_poles.append(p)
 
         # Only display the first unique pole
-        pole_str = f"{unique_poles[0]:5.3f}"
+        pole_str = f"{unique_poles[0]:.{sigfigs}f}"
 
-        ax.text(
-            xdelta,
-            dim - (k + 1) * ydelta,
-            f"Gain: {bp.K:5.3f} at s = {pole_str}",
-            fontsize=8
-        )
+        ax.text(xdelta,ymin + (k + 1) * yrel * (ymax - ymin),
+            f"Gain: {bp.K:.{sigfigs}f} at s = {pole_str}",
+            fontsize=8)
 
 def near_zero(P, Tol=1e-12):
     '''remove small terms in the num/den of the TF'''
@@ -2143,61 +2148,89 @@ def write_latex_constants(S0, filename="./figs/constants.tex", idname=None, fmt=
             macro = sanitize_letters(name) + suffix
             f.write(r"\def\%s{%s}" % (macro, fmt % val) + "\n")
 
-def write_tf_latex(G, filename, label, sigfigs=4, factor=None, inline=None):
-    num, den = ct.tfdata(G)
-    num = np.squeeze(num)
-    den = np.squeeze(den)
+def write_tf_latex(G, filename, label, sigfigs=4,
+                   factor=False, inline=False,
+                   name=None, time_constant=False):
 
-    if not factor:
-        num_tex = _poly_to_latex(num, sigfigs)
-        den_tex = _poly_to_latex(den, sigfigs)
-        tex = rf"\dfrac{{{num_tex}}}{{{den_tex}}}"
+    latex_str = show_tf_latex(
+        G,
+        label=label,
+        sigfigs=sigfigs,
+        show=False,
+        factor=factor,
+        name=name,
+        time_constant=time_constant
+    )
 
-    else:
-        Kn, rnum, qnum = factor_poly_real(num)
-        Kd, rden, qden = factor_poly_real(den)
-
-        # cancel common real roots
-        rnum, rden = cancel_common_real_roots(rnum, rden)
-
-        # ---- FIX: recluster real roots after cancellation ----
-        def cluster(roots, tol=1e-5):
-            if not roots:
-                return roots
-            roots = sorted(roots)
-            clustered = [roots[0]]
-            for r in roots[1:]:
-                if abs(r - clustered[-1]) < tol:
-                    clustered.append(clustered[-1])  # force exact equality
-                else:
-                    clustered.append(r)
-            return clustered
-
-        rnum = cluster(rnum)
-        rden = cluster(rden)
-        # ------------------------------------------------------
-
-        gain = Kn / Kd
-
-        num_fac = poly_factors_to_latex(gain, rnum, qnum, sigfigs)
-        den_fac = poly_factors_to_latex(1.0, rden, qden, sigfigs)
-
-        if num_fac == "":
-            num_fac = f"{gain:.{sigfigs}g}"
-        if den_fac == "":
-            den_fac = "1"
-
-        tex = rf"\displaystyle \frac{{{num_fac}}}{{{den_fac}}}"
+    # remove outer $...$ from show_tf_latex
+    if latex_str.startswith("$") and latex_str.endswith("$"):
+        latex_str = latex_str[1:-1]
 
     with open(filename, "w") as f:
-        if inline is True:
+        if inline:
             f.write("$\n")
-            f.write(label + " = " + tex + "\n")
+            f.write(latex_str + "\n")
             f.write("$\n")
         else:
             f.write("\\[\n")
-            f.write(label + " = " + tex + "\n")
+            f.write(latex_str + "\n")
             f.write("\\]\n")
+if 0:
+    def write_tf_latex(G, filename, label, sigfigs=4, factor=None, inline=None):
+        num, den = ct.tfdata(G)
+        num = np.squeeze(num)
+        den = np.squeeze(den)
+
+        if not factor:
+            num_tex = _poly_to_latex(num, sigfigs)
+            den_tex = _poly_to_latex(den, sigfigs)
+            tex = rf"\dfrac{{{num_tex}}}{{{den_tex}}}"
+
+        else:
+            Kn, rnum, qnum = factor_poly_real(num)
+            Kd, rden, qden = factor_poly_real(den)
+
+            # cancel common real roots
+            rnum, rden = cancel_common_real_roots(rnum, rden)
+
+            # ---- FIX: recluster real roots after cancellation ----
+            def cluster(roots, tol=1e-5):
+                if not roots:
+                    return roots
+                roots = sorted(roots)
+                clustered = [roots[0]]
+                for r in roots[1:]:
+                    if abs(r - clustered[-1]) < tol:
+                        clustered.append(clustered[-1])  # force exact equality
+                    else:
+                        clustered.append(r)
+                return clustered
+
+            rnum = cluster(rnum)
+            rden = cluster(rden)
+            # ------------------------------------------------------
+
+            gain = Kn / Kd
+
+            num_fac = poly_factors_to_latex(gain, rnum, qnum, sigfigs)
+            den_fac = poly_factors_to_latex(1.0, rden, qden, sigfigs)
+
+            if num_fac == "":
+                num_fac = f"{gain:.{sigfigs}g}"
+            if den_fac == "":
+                den_fac = "1"
+
+            tex = rf"\displaystyle \frac{{{num_fac}}}{{{den_fac}}}"
+
+        with open(filename, "w") as f:
+            if inline is True:
+                f.write("$\n")
+                f.write(label + " = " + tex + "\n")
+                f.write("$\n")
+            else:
+                f.write("\\[\n")
+                f.write(label + " = " + tex + "\n")
+                f.write("\\]\n")
 
 def normalize_tf(G):
     '''factor out non-unity gain for leading coefficient of the denominator'''
