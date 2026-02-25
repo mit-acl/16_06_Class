@@ -8,8 +8,6 @@ All environment/setup is opt-in via setup_environment().
 __version__ = "16.06-0.5"
 
 import numpy as np
-import cmath
-
 import matplotlib.pyplot as plt
 import sympy as sp
 import control as ct
@@ -18,10 +16,10 @@ import control.matlab as cmat
 import importlib.util
 from dataclasses import dataclass
 from typing import List
-from IPython.display import Math
+from IPython.display import Math, display, Markdown, Latex
+
 import scipy.linalg
-from scipy.linalg import solve_continuous_lyapunov, svd, sqrtm, cholesky, eigvals
-from scipy.linalg import eigh # symmetric matrices
+from scipy.linalg import solve_continuous_lyapunov, svd, sqrtm, cholesky, eigvals, eigh # symmetric matrices
 from scipy.signal import residue
 import re
 
@@ -218,17 +216,39 @@ def RL_COM(L, standard_locus=True):
     """
     Return center of mass and angle (in degs) for root locus asymptotes.
     """
-    m = len(L.poles()) - len(L.zeros())
+    p = np.asarray(L.poles(), dtype=complex)
+    z = np.asarray(L.zeros(), dtype=complex)
+    n = len(p)
+    m = len(z)
+    Num_excess_poles = n - m
 
-    if m <= 0:
+    if Num_excess_poles <= 0:
         return None, None
-    if m <= 1: # technically need 2 more poles than zeros (FPE 265), but this is degenerate case 
-        return None, 180.0 if standard_locus else 0.0
 
-    CoM = (sum(L.poles()) - sum(L.zeros())) / m
-    Ang = (180.0 / m) % 360.0 if standard_locus else (360.0 / m) % 360.0
+    CoM = np.real(sum(p) - sum(z)) / Num_excess_poles
 
-    return CoM, Ang
+    # Asymptote angles
+    k = np.arange(Num_excess_poles)
+    if standard_locus:
+        angles = (2*k + 1) * 180.0 / Num_excess_poles # angles = (2k+1) * 180 / Num_excess_poles
+    else:
+        angles = k * 360.0 / Num_excess_poles         # 360/Num_excess_poles spacing starting at 0
+
+    return CoM, angles
+
+def plot_rl_asymptotes(ax, com, angles_deg, rmax=10, **kwargs):
+    """
+    Plot root locus asymptotes.
+    ax         : matplotlib axis
+    com        : centroid (real scalar)
+    angles_deg : iterable of angles in degrees
+    rmax       : length of asymptotes
+    kwargs     : passed to ax.plot (e.g. color, linewidth)
+    """
+    rho = np.linspace(0, rmax, 2)
+    for ang in angles_deg:
+        s = com + rho * np.exp(1j * np.deg2rad(ang))
+        ax.plot(s.real,s.imag,linestyle="--",**kwargs)
 
 def pshift(Gp, period = 2*np.pi):
     '''shift phase to within +/-180 or +/-pi'''
@@ -285,7 +305,7 @@ def Root_Locus_design_cancel(G, s_target=complex(-1, 2), s_cancel=-1, verbose=Fa
     phi_fromG = float(np.atleast_1d(phi_fromG)[0])
 
     # phase from cancelling zero
-    phi_from_Gc_zero = float(sum(cmath.phase(s_target - z) for z in np.atleast_1d(np.real(s_cancel))) * r2d)
+    phi_from_Gc_zero = float(sum(np.angle(s_target - z) for z in np.atleast_1d(np.real(s_cancel))) * r2d)
 
     # required phase to satisfy angle condition
     phi_required = -wrap_phase_neg(-180.0 - (phi_fromG + phi_from_Gc_zero))
@@ -309,7 +329,7 @@ def Root_Locus_design_cancel(G, s_target=complex(-1, 2), s_cancel=-1, verbose=Fa
             rf"$\angle G(s_{{target}}) + \angle G_c(s_{{target}}) = -180^\circ$, the (absolute value of the) required phase from the compensator pole is "
             rf"$$\phi_{{required}} = \arctan\!\left(\frac{{Im\{{s_{{target}}\}}}}{{Re\{{s_{{target}}\}} + P}}\right) \qquad \Rightarrow \qquad "
             rf"P = -Re\{{s_{{target}}\}} + \frac{{Im\{{s_{{target}}\}}}}{{\tan(\phi_{{required}})}}$$ "            
-            rf"so that, with $\phi_{{required}} = {phi_required:.2f}$ degs, the compensator pole is at $P = {P:.3f}$. \newline This yields $G_c(s) = \dfrac{{s + {-Gczeros[0]:.2f}}}{{s + {P:.2f}}}$, and" 
+            rf"so that, with $\phi_{{required}} = {phi_required:.2f}$ degs, the compensator pole is at $P = {P:.3f}$. This yields the compensator $G_c(s) = k_c\dfrac{{s + {-Gczeros[0]:.2f}}}{{s + {P:.2f}}}$, and" 
             rf" the compensator gain is selected to satisfy $$|G(s_{{target}})G_c(s_{{target}})| = 1,$$ resulting in a gain of $k_c = {Gain:.3f}$, so that"
             rf"$$G_c(s) = {Gain:.2f}\dfrac{{s + {-Gczeros[0]:.2f}}}{{s + {P:.2f}}}$$" 
         )
@@ -334,7 +354,7 @@ def phase_at_freq(G,s0,modulation = None):
     else:
         return phi_fromG % 360
 
-def Root_Locus_design_ratio(G, s_target=complex(-1, 2), gamma=10, verbose=False):
+def Root_Locus_design_ratio(G, s_target=complex(-1, 2), gamma=10, verbose=False, indx=None):
     """
     Root locus design using zero/pole ratio gamma.
     Returns Gc, Gcl_poles()
@@ -359,7 +379,9 @@ def Root_Locus_design_ratio(G, s_target=complex(-1, 2), gamma=10, verbose=False)
     if not z_candidates:
         raise ValueError("No physically valid zero location found")
 
-    z = z_candidates[0]
+    if indx is None:
+        indx = 0
+    z = z_candidates[indx]
     p = gamma * z
     # Gain to satisfy magnitude condition at s_target
     Gc = ct.tf([1,z],[1,p])
@@ -877,8 +899,8 @@ def Departure_angle(L,s0,Tol=1e-4):
         s0 - target point
         Tol - to remove the pole/zero at s0 from the evaluation
     '''
-    phi_d = (180+sum([cmath.phase(x) for x in (s0 - L.zeros()) if np.abs(x) > Tol])*r2d \
-                -sum([cmath.phase(x) for x in (s0 - L.poles()) if np.abs(x) > Tol])*r2d) % 360 
+    phi_d = (180+sum([np.angle(x, deg=True) for x in (s0 - L.zeros()) if np.abs(x) > Tol]) \
+                -sum([np.angle(x, deg=True) for x in (s0 - L.poles()) if np.abs(x) > Tol])) % 360 
     return phi_d
 
 def Arrival_angle(L,s0,Tol=1e-4):
@@ -888,8 +910,8 @@ def Arrival_angle(L,s0,Tol=1e-4):
         s0 - target point
         Tol - to remove the pole/zero at s0 from the evaluation
     '''
-    phi_a = (180-sum([cmath.phase(x) for x in (s0 - L.zeros()) if np.abs(x) > Tol])*r2d \
-                +sum([cmath.phase(x) for x in (s0 - L.poles()) if np.abs(x) > Tol])*r2d) % 360
+    phi_a = (180-sum([np.angle(x, deg=True) for x in (s0 - L.zeros()) if np.abs(x) > Tol]) \
+                +sum([np.angle(x, deg=True) for x in (s0 - L.poles()) if np.abs(x) > Tol])) % 360
     return phi_a
 
 def caption(txt, fig=None, xloc=0.5, yloc=-0.05):
@@ -901,22 +923,21 @@ def caption(txt, fig=None, xloc=0.5, yloc=-0.05):
         fig = plt.gcf()
     fig.text(xloc, yloc, txt, ha="center", size=MEDIUM_SIZE, color="blue")
 
-def new_pzmap(G, ax = None, title = None):
+def new_pzmap(G, ax = None, title = None, ms = 6):
     '''PZ map with nicer markers for the poles/zeros
     Inputs:
         G - system
         ax - figure axis, returned if not provided
         title
     '''
+    return_ax = False
     if ax is None:
         fig, ax = plt.subplots(figsize=(5, 5))
         return_ax = True
-    else:
-        return_ax = False
-
-    ax.plot(np.real(G.poles()), np.imag(G.poles()), "bx", ms=6)
-    ax.plot(np.real(G.zeros()), np.imag(G.zeros()), "o", ms=6, 
-        markeredgewidth=2,markeredgecolor="r", markerfacecolor="r")
+    
+    ax.plot(np.real(G.poles()), np.imag(G.poles()), "bx", ms=ms,zorder=1)
+    ax.plot(np.real(G.zeros()), np.imag(G.zeros()), "o", ms=ms, 
+        markeredgewidth=2,markeredgecolor="r", markerfacecolor="r",zorder=10)
     ax.set_xlabel("Real")
     ax.set_ylabel("Imaginary")
 
@@ -929,42 +950,89 @@ def new_pzmap(G, ax = None, title = None):
     if return_ax:
         return ax
 
-def color_rl(ax, ms=8, lw=1.5):
-    '''
-    Change RL line colors
-    Inputs:
-        ms = 8
-        lw = 1.5
-    '''
+def color_rl(ax, ms=6, lw=1.75, verbose=False):
+    """
+    Change RL line colors and stacking order.
+
+    unique = cm.color_rl(ax,verbose=True)
+    ax.legend(unique.values(), unique.keys())
+
+    """
+
+    # stacking policy
+    order = {
+        "branch": 2,
+        "pole": 4,
+        "zero": 10,
+        "s0": 8,
+        "scl": 20,
+    }
+
     for line in ax.lines:
-        if line.get_linestyle() == "-":
+
+        # suppress rlocus legend duplication
+        if line.get_label().startswith("sys"):
+            line.set_label("_nolegend_")
+
+        x = np.asarray(line.get_xdata())
+        y = np.asarray(line.get_ydata())
+
+        # Skip completely empty lines (defensive)
+        if x.size == 0 or y.size == 0:
+            continue
+
+        is_vertical = np.allclose(x, x[0])
+        is_horizontal = np.allclose(y, y[0])
+
+        # root locus branches
+        if (line.get_linestyle() == "-" and line.get_marker() == "None" 
+            and not (is_vertical or is_horizontal)):
             line.set_linewidth(lw)
             line.set_color("blue")
-        if line.get_marker() == "x":
+            line.set_zorder(order["branch"])
+
+        # open loop poles
+        elif line.get_marker() == "x":
             line.set_markersize(ms)
-            line.set_color("blue")
-        if line.get_marker() == "o":
+            line.set_markeredgecolor("blue")
+            line.set_zorder(order["pole"])
+
+        # open loop zeros
+        elif line.get_marker() == "o":
             line.set_markersize(ms)
             line.set_markerfacecolor("r")
             line.set_markeredgecolor("r")
-        if line.get_marker() == "d":
+            line.set_zorder(order["zero"])
+
+        # s0 diamonds
+        elif line.get_marker() == "d":
             line.set_markersize(ms)
-            line.set_markerfacecolor("g")
-            line.set_markeredgecolor("g")
+            line.set_markerfacecolor("m")
+            line.set_markeredgecolor("m")
+            line.set_zorder(order["s0"])
+
+        # scl squares
+        elif line.get_marker() == "s":
+            line.set_markersize(int(ms * 0.75))
+            line.set_markerfacecolor("c")
+            line.set_markeredgecolor("c")
+            line.set_zorder(order["scl"])
+
+    if verbose:
+        handles, labels = ax.get_legend_handles_labels()
+        unique = {}
+        for h, l in zip(handles, labels):
+            if l not in unique:
+                unique[l] = h
+        return unique
 
 def Read_data(file_name, comments=["#", "F"], cols=[0]):
     return np.loadtxt(file_name, comments=comments, delimiter=",", usecols=cols)
 
 def add_break_info(ax, break_info, dim=None, tol=1e-6, delta=None, sigfigs=3):
-    '''Add the root locus break in/out info to the plot
-    inputs:
-    ax: plot
-    break_info: from add_break_info
-    dim: plot size
-    tol: 
-    '''
+    """Add the root locus break in/out info to the plot"""
+
     if delta is None:
-        # default relative offsets
         xrel = 0.05
         yrel = 0.1
     else:
@@ -974,7 +1042,6 @@ def add_break_info(ax, break_info, dim=None, tol=1e-6, delta=None, sigfigs=3):
     xmin, xmax = ax.get_xlim()
 
     xdelta = xmin + xrel * (xmax - xmin)
-    ydelta = ymin + yrel * (ymax - ymin)
 
     if dim is None:
         dim = float(ymax)
@@ -982,20 +1049,35 @@ def add_break_info(ax, break_info, dim=None, tol=1e-6, delta=None, sigfigs=3):
     if not break_info:
         return
 
-    for k, bp in enumerate(break_info):
-
+    # -------------------------------------------------
+    # Deduplicate entire BreakPoint objects
+    # -------------------------------------------------
+    unique_bp = []
+    for bp in break_info:
         poles = np.atleast_1d(bp.poles).astype(float)
 
-        # Deduplicate with tolerance
-        unique_poles = []
-        for p in poles:
-            if not any(abs(p - q) <= tol for q in unique_poles):
-                unique_poles.append(p)
+        is_new = True
+        for ubp in unique_bp:
+            upoles = np.atleast_1d(ubp.poles).astype(float)
 
-        # Only display the first unique pole
-        pole_str = f"{unique_poles[0]:.{sigfigs}f}"
+            if np.isclose(bp.K, ubp.K, atol=tol) and \
+               np.allclose(poles, upoles, atol=tol):
+                is_new = False
+                break
 
-        ax.text(xdelta,ymin + (k + 1) * yrel * (ymax - ymin),
+        if is_new:
+            unique_bp.append(bp)
+
+    # -------------------------------------------------
+    # Now display only unique breakpoints
+    # -------------------------------------------------
+    for k, bp in enumerate(unique_bp):
+
+        poles = np.atleast_1d(bp.poles).astype(float)
+        pole_str = f"{poles[0]:.{sigfigs}f}"
+
+        ax.text(xdelta,
+            ymin + (k + 1) * yrel * (ymax - ymin),
             f"Gain: {bp.K:.{sigfigs}f} at s = {pole_str}",
             fontsize=8)
 
@@ -1263,10 +1345,26 @@ def pretty_row_print(X,msg="",sigfigs=None,decimals=3,complex_decimals=2):
     def fmt_complex(x):
         r = x.real
         i = x.imag
+
         if sigfigs is not None:
-            return f"({r:.{sigfigs}g} + {i:.{sigfigs}g}i)"
+            r_str = f"{r:.{sigfigs}g}"
+            i_mag_str = f"{abs(i):.{sigfigs}g}"
         else:
-            return f"({r:.{complex_decimals}f} + {i:.{complex_decimals}f}i)"
+            r_str = f"{r:.{complex_decimals}f}"
+            i_mag_str = f"{abs(i):.{complex_decimals}f}"
+
+        # purely real
+        if abs(i) < 1e-12:
+            return r_str
+
+        # purely imaginary
+        if abs(r) < 1e-12:
+            sign = "-" if i < 0 else ""
+            return f"({sign}{i_mag_str}i)"
+
+        # full complex
+        sign = "-" if i < 0 else "+"
+        return f"({r_str} {sign} {i_mag_str}i)"
 
     out = []
     for x in X:
@@ -1276,7 +1374,8 @@ def pretty_row_print(X,msg="",sigfigs=None,decimals=3,complex_decimals=2):
         else:
             out.append(fmt_real(x.real))
 
-    print(msg + ", ".join(out))
+    row = msg + " " + ", ".join(out)
+    display(Markdown(row))
 
 def feedback_ff(G, K, Kff):
     if isinstance(G, (int, float, np.number)):
@@ -1469,19 +1568,26 @@ def show_tf_latex(P, label=None, sigfigs=2, show=None, factor=False,
         Kn, rnum, qnum = factor_poly_real(num)
         Kd, rden, qden = factor_poly_real(den)
 
-        rnum_c, rden_c = cancel_common_real_roots(rnum, rden)
+        # cancel common real roots (returns deterministic sorted lists now)
+        rnum_c, rden_c = cancel_common_real_roots(rnum, rden, tol=1e-6)
 
+        # ensure deterministic ordering (in case upstream callers pass unsorted lists)
+        rnum_c = sorted(rnum_c, key=lambda r: (abs(r), r))
+        rden_c = sorted(rden_c, key=lambda r: (abs(r), r))
+
+        # quadratics: sort by C (which is a^2 + b^2) then B for stability
+        qnum = sorted(qnum, key=lambda bc: (bc[1], bc[0]))
+        qden = sorted(qden, key=lambda bc: (bc[1], bc[0]))
+
+        # apply time-constant normalization AFTER sorting the physical roots so ordering
+        # is done on the actual root locations (more intuitive)
         if time_constant:
-            # Normalize first order real factors
-            # (s - r) with r real becomes (s/a + 1) with a = -r
-            # gain multiplied by a
-
             def normalize_real_roots(rlist):
                 new_roots = []
                 gain_scale = 1.0
                 for r in rlist:
                     if np.isreal(r):
-                        r = np.real(r)
+                        r = float(np.real(r))
                         a = -r
                         if a != 0:
                             gain_scale *= a
@@ -1498,6 +1604,7 @@ def show_tf_latex(P, label=None, sigfigs=2, show=None, factor=False,
             Kn *= scale_num
             Kd *= scale_den
 
+        # build latex bodies with the now-ordered lists
         num_body = factors_to_latex(rnum_c, qnum, var, sigfigs,
                                     time_constant=time_constant)
         den_body = factors_to_latex(rden_c, qden, var, sigfigs,
@@ -1518,17 +1625,18 @@ def show_tf_latex(P, label=None, sigfigs=2, show=None, factor=False,
 
     return latex_str
 
-def _num_to_latex(x, sigfigs=4):
-    """
-    Convert a float to LaTeX-safe numeric string.
-    Uses \\times 10^{k} for scientific notation, with clean exponents.
-    """
-    s = f"{x:.{sigfigs}g}"
-    if "e" in s or "E" in s:
-        base, exp = s.replace("E", "e").split("e")
-        exp = int(exp)   # <-- THIS removes leading zeros
-        return rf"{base}\times 10^{{{exp}}}"
-    return s
+if 0:
+    def _num_to_latex(x, sigfigs=4):
+        """
+        Convert a float to LaTeX-safe numeric string.
+        Uses \\times 10^{k} for scientific notation, with clean exponents.
+        """
+        s = f"{x:.{sigfigs}g}"
+        if "e" in s or "E" in s:
+            base, exp = s.replace("E", "e").split("e")
+            exp = int(exp)   # <-- THIS removes leading zeros
+            return rf"{base}\times 10^{{{exp}}}"
+        return s
 
 def _sci_to_latex(s):
     """
@@ -1539,23 +1647,36 @@ def _sci_to_latex(s):
         return rf"{base} \times 10^{{{int(exp)}}}"
     return s
 
-def tf_to_latex(G):
-    s = sp.Symbol('s')
-    
-    # Get numerator and denominator coefficients
-    num, den = ct.tfdata(G)
-    num = np.atleast_1d(np.squeeze(num))
-    den = np.atleast_1d(np.squeeze(den))
+def tf_to_latex(G, sigfigs=2, factor=False, time_constant=False):
+    """
+    Backward-compatible wrapper for show_tf_latex.
+    Returns LaTeX string (without surrounding $).
+    """
+    latex_str = show_tf_latex(G,label=None,sigfigs=sigfigs,
+        show=False,factor=factor,time_constant=time_constant)
+    # remove outer $...$ added by show_tf_latex
+    if latex_str.startswith("$") and latex_str.endswith("$"):
+        latex_str = latex_str[1:-1]
+    return latex_str
 
-    # Convert to symbolic expressions
-    num_poly = sum(np.round(coef,2) * s**i for i, coef in enumerate(reversed(num)))
-    den_poly = sum(np.round(coef,2) * s**i for i, coef in enumerate(reversed(den)))
+if 0:
+    def tf_to_latex(G):
+        s = sp.Symbol('s')
+        
+        # Get numerator and denominator coefficients
+        num, den = ct.tfdata(G)
+        num = np.atleast_1d(np.squeeze(num))
+        den = np.atleast_1d(np.squeeze(den))
 
-    # Create the LaTeX representation
-    G_sym = num_poly / den_poly
-    raw_latex = sp.latex(G_sym)
-    nice_latex = raw_latex.replace(r"\frac", r"\dfrac")     # force displaystyle fractions
-    return nice_latex
+        # Convert to symbolic expressions
+        num_poly = sum(np.round(coef,2) * s**i for i, coef in enumerate(reversed(num)))
+        den_poly = sum(np.round(coef,2) * s**i for i, coef in enumerate(reversed(den)))
+
+        # Create the LaTeX representation
+        G_sym = num_poly / den_poly
+        raw_latex = sp.latex(G_sym)
+        nice_latex = raw_latex.replace(r"\frac", r"\dfrac")     # force displaystyle fractions
+        return nice_latex
 
 def _matrix_to_latex(M, sigfigs=4):
     M = np.atleast_2d(np.array(M, dtype=float))
@@ -1738,13 +1859,21 @@ def factors_to_latex(real_roots, quads, var="s",sigfigs=4, tol=1e-8,time_constan
     nz_roots = real_roots[~zero_mask]
 
     if len(nz_roots) > 0:
-        # round to avoid floating point duplicates
+        # round first to stabilize duplicates
         nz_roots = np.round(nz_roots, sigfigs)
 
-        unique_roots, counts = np.unique(nz_roots, return_counts=True)
+        # cluster WITHOUT reordering
+        clustered = []
+        for r in nz_roots:
+            if not clustered:
+                clustered.append([r, 1])
+            else:
+                if abs(r - clustered[-1][0]) <= tol:
+                    clustered[-1][1] += 1
+                else:
+                    clustered.append([r, 1])
 
-        for r, mult in zip(unique_roots, counts):
-
+        for r, mult in clustered:
             a = -r  # since factor is (s - r) = (s + a)
 
             if time_constant and abs(a) > tol:
@@ -1769,9 +1898,19 @@ def factors_to_latex(real_roots, quads, var="s",sigfigs=4, tol=1e-8,time_constan
 
     # ---- handle quadratic factors ----
     for B, C in quads:
-        Bs = fmt(B, sigfigs)
-        Cs = fmt(C, sigfigs)
-        parts.append(f"({var}^2+{Bs}{var}+{Cs})")
+        quad = f"{var}^2"
+
+        # B term
+        if abs(B) > tol:
+            signB = "-" if B < 0 else "+"
+            quad += f"{signB}{fmt(abs(B), sigfigs)}{var}"
+
+        # C term
+        if abs(C) > tol:
+            signC = "-" if C < 0 else "+"
+            quad += f"{signC}{fmt(abs(C), sigfigs)}"
+
+        parts.append(f"({quad})")
 
     return "1" if not parts else "".join(parts)
 
@@ -2100,14 +2239,14 @@ def factor_poly_real(coeffs, tol=1e-6):
                 clustered.append([r, 1])
 
     # convert back to list with multiplicity
+    # convert back to list with multiplicity
     real_roots = []
     for r, mult in clustered:
         real_roots.extend([r]*mult)
 
-    # sort by magnitude
-    real_roots.sort(key=lambda r: abs(r))
-
-    quads.sort(key=lambda q: q[1])
+    # final deterministic ordering
+    real_roots = sorted(real_roots, key=lambda r: (abs(r), r))
+    quads = sorted(quads, key=lambda q: (q[1], q[0]))
 
     return K, real_roots, quads
 
@@ -2150,17 +2289,10 @@ def write_latex_constants(S0, filename="./figs/constants.tex", idname=None, fmt=
 
 def write_tf_latex(G, filename, label, sigfigs=4,
                    factor=False, inline=False,
-                   name=None, time_constant=False):
+                   name=None, time_constant=False,show=False):
 
-    latex_str = show_tf_latex(
-        G,
-        label=label,
-        sigfigs=sigfigs,
-        show=False,
-        factor=factor,
-        name=name,
-        time_constant=time_constant
-    )
+    latex_str = show_tf_latex(G,label=label,sigfigs=sigfigs,show=False,
+        factor=factor,name=name,time_constant=time_constant)
 
     # remove outer $...$ from show_tf_latex
     if latex_str.startswith("$") and latex_str.endswith("$"):
@@ -2175,62 +2307,6 @@ def write_tf_latex(G, filename, label, sigfigs=4,
             f.write("\\[\n")
             f.write(latex_str + "\n")
             f.write("\\]\n")
-if 0:
-    def write_tf_latex(G, filename, label, sigfigs=4, factor=None, inline=None):
-        num, den = ct.tfdata(G)
-        num = np.squeeze(num)
-        den = np.squeeze(den)
-
-        if not factor:
-            num_tex = _poly_to_latex(num, sigfigs)
-            den_tex = _poly_to_latex(den, sigfigs)
-            tex = rf"\dfrac{{{num_tex}}}{{{den_tex}}}"
-
-        else:
-            Kn, rnum, qnum = factor_poly_real(num)
-            Kd, rden, qden = factor_poly_real(den)
-
-            # cancel common real roots
-            rnum, rden = cancel_common_real_roots(rnum, rden)
-
-            # ---- FIX: recluster real roots after cancellation ----
-            def cluster(roots, tol=1e-5):
-                if not roots:
-                    return roots
-                roots = sorted(roots)
-                clustered = [roots[0]]
-                for r in roots[1:]:
-                    if abs(r - clustered[-1]) < tol:
-                        clustered.append(clustered[-1])  # force exact equality
-                    else:
-                        clustered.append(r)
-                return clustered
-
-            rnum = cluster(rnum)
-            rden = cluster(rden)
-            # ------------------------------------------------------
-
-            gain = Kn / Kd
-
-            num_fac = poly_factors_to_latex(gain, rnum, qnum, sigfigs)
-            den_fac = poly_factors_to_latex(1.0, rden, qden, sigfigs)
-
-            if num_fac == "":
-                num_fac = f"{gain:.{sigfigs}g}"
-            if den_fac == "":
-                den_fac = "1"
-
-            tex = rf"\displaystyle \frac{{{num_fac}}}{{{den_fac}}}"
-
-        with open(filename, "w") as f:
-            if inline is True:
-                f.write("$\n")
-                f.write(label + " = " + tex + "\n")
-                f.write("$\n")
-            else:
-                f.write("\\[\n")
-                f.write(label + " = " + tex + "\n")
-                f.write("\\]\n")
 
 def normalize_tf(G):
     '''factor out non-unity gain for leading coefficient of the denominator'''
