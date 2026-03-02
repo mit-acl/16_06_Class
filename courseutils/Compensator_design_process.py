@@ -320,12 +320,12 @@ def design_process(G, Mp = None, Tr = None, Tp = None, Ts = None, ess_step = Non
             ax1.plot(np.real(Gc_lag.zeros()), np.imag(Gc_lag.zeros()), 'yo', ms=8, label='Lag Zero')
             ax1.plot(np.real(Gc_lag.poles()), np.imag(Gc_lag.poles()), 'mx', ms=8, label='Lag Pole')
 
-        ax1.text(0.05, 0.95, f'Lead Zero: {np.real(-Gc_lead.zeros())[0]:.2f}', transform=ax1.transAxes, fontsize=12, color='green', verticalalignment='top')
-        ax1.text(0.05, 0.90, f'Lead Pole: {np.real(-Gc_lead.poles())[0]:.2f}', transform=ax1.transAxes, fontsize=12, color='red', verticalalignment='top')
-        ax1.text(0.05, 0.85, f'Lead Gain: {Gc_lead.num[0][0][0]/Gc_lead.den[0][0][0]:.2f}', transform=ax1.transAxes, fontsize=12, color='blue', verticalalignment='top')
+        ax1.text(0.05, 0.95, f'Lead Zero: {np.real(-Gc_lead.zeros())[0]:.2f}', transform=ax1.transAxes, fontsize=8, color='green', verticalalignment='top')
+        ax1.text(0.05, 0.90, f'Lead Pole: {np.real(-Gc_lead.poles())[0]:.2f}', transform=ax1.transAxes, fontsize=8, color='red', verticalalignment='top')
+        ax1.text(0.05, 0.85, f'Lead Gain: {Gc_lead.num[0][0][0]/Gc_lead.den[0][0][0]:.2f}', transform=ax1.transAxes, fontsize=8, color='blue', verticalalignment='top')
         if Gc_lag is not None:
-            ax1.text(0.05, 0.75, f'Lag Zero: {np.real(-Gc_lag.zeros())[0]:.2f}', transform=ax1.transAxes, fontsize=12, color='black', verticalalignment='top')
-            ax1.text(0.05, 0.7, f'Lag Pole: {np.real(-Gc_lag.poles())[0]:.2f}', transform=ax1.transAxes, fontsize=12, color='magenta', verticalalignment='top')
+            ax1.text(0.05, 0.75, f'Lag Zero: {np.real(-Gc_lag.zeros())[0]:.2f}', transform=ax1.transAxes, fontsize=8, color='black', verticalalignment='top')
+            ax1.text(0.05, 0.7, f'Lag Pole: {np.real(-Gc_lag.poles())[0]:.2f}', transform=ax1.transAxes, fontsize=8, color='magenta', verticalalignment='top')
 
         # Insert to lower right of ax1 that plots the root locus near the origin
         ax_inset = ax1.inset_axes([0.75, 0.15, 0.2, 0.2])
@@ -362,7 +362,8 @@ def design_process(G, Mp = None, Tr = None, Tp = None, Ts = None, ess_step = Non
                 Line2D([0], [0], color='red', marker='x', markersize=8, linestyle='None'),
             ]
             # Add legend with custom handles
-            ax1.legend(custom_lines, ['Root Locus', 'Desired CLP', 'Lag CLP', 'Lead Zero', 'Lead Pole'], loc='upper right')
+            ax1.legend(custom_lines, ['Root Locus', 'Desired CLP', 
+                'Lag CLP', 'Lead Zero', 'Lead Pole'], loc='upper right',fontsize=8)
         else:
             custom_lines = [
                 Line2D([0], [0], color='blue', lw=2, linestyle='-'),
@@ -374,7 +375,8 @@ def design_process(G, Mp = None, Tr = None, Tp = None, Ts = None, ess_step = Non
                 Line2D([0], [0], color='magenta', marker='x', markersize=8, linestyle='None'),
             ]
             # Add legend with custom handles
-            ax1.legend(custom_lines, ['Root Locus', 'Desired CLP', 'Lag CLP', 'Lead Zero', 'Lead Pole', 'Lag Zero', 'Lag Pole'], loc='upper right')
+            ax1.legend(custom_lines, ['Root Locus', 'Desired CLP', 'Lag CLP', 'Lead Zero', 
+                'Lead Pole', 'Lag Zero', 'Lag Pole'], loc='upper right',fontsize=8)
 
         bm.nicegrid(ax1)
         if make_plots:
@@ -413,7 +415,7 @@ def design_process(G, Mp = None, Tr = None, Tp = None, Ts = None, ess_step = Non
             ax3.set_ylabel('Response')
             ax3.grid(True)
             ax3.axhline(y=factor*ess_ramp, color='k', linestyle='--')
-            ax3.legend(('Lag','Lag Err','Lead','Lead Err'))
+            ax3.legend(('Lag','Lag Err','Lead','Lead Err'),fontsize=8)
             ax3.set_title(f'Design {iter_count}', loc='left')
             if make_plots:
                 plt.savefig("./figs/"+file_prefix+str(iter_count)+"_ramp_lag.pdf", dpi=600)

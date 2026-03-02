@@ -218,9 +218,7 @@ def RL_COM(L, standard_locus=True):
     """
     p = np.asarray(L.poles(), dtype=complex)
     z = np.asarray(L.zeros(), dtype=complex)
-    n = len(p)
-    m = len(z)
-    Num_excess_poles = n - m
+    Num_excess_poles = len(p) - len(z)
 
     if Num_excess_poles <= 0:
         return None, None
@@ -434,29 +432,34 @@ def Root_Locus_design_ratio(G, s_target=complex(-1, 2), gamma=10, verbose=False,
     else:
         return Gc, Gcl.poles()
 
-def Root_Locus_design_PD(G, s_target=complex(-1, 2), verbose=False):
+def Root_Locus_design_PD(G, s_target=complex(-1, 2), verbose=False, Tol=1e-5):
     """
     PD design to place CL poles at s_target.
     Returns (Gc, Gcl_poles).
     """
-    phi_fromG = phase_at_freq(G,s_target)
-    phi_required_deg = 180 - phi_fromG
+    phi_fromG = wrap_phase_neg(phase_at_freq(G,s_target))
+    phi_required_deg = (-180 - phi_fromG)%360
 
-    Z = s_target.imag / np.tan(phi_required_deg/r2d) - s_target.real
+    z = s_target.imag / np.tan(phi_required_deg/r2d) - s_target.real
 
     # without gain
-    Gc = ct.tf((1, Z), 1)
-    Gain = -1.0 / np.real(G(s_target) * Gc(s_target))
+    Gc = ct.tf((1, z), 1)
+    L = G*Gc
+    if np.abs(np.imag(L(s_target))) < Tol:
+        Gain = -1.0 / np.real(L(s_target))
+    else:
+        print("Possible RL error")
+        Gain = -1.0 / np.abs(L(s_target))
 
     # apply gain
     Gc *= Gain
-    L = G * Gc
+    L *= Gain
     Gcl = ct.feedback(L)
 
     if verbose:
         return Gc, Gcl.poles(), SimpleNamespace(**{
         "phi_from_G": phi_fromG,
-        "phi_required": phi_required,
+        "phi_required": phi_required_deg,
         })
     else:
         return Gc, Gcl.poles()
@@ -1323,7 +1326,7 @@ def balred(G, order = None, DCmatch = False, check = False, method = None, Tol=1
 
     return Gr if is_ss else ct.ss2tf(Gr)
 
-def pretty_row_print(X,msg="",sigfigs=None,decimals=3,complex_decimals=2):
+def pretty_row_print(X,msg="",sigfigs=None,decimals=3,complex_decimals=2,verbose=None):
     """
     Pretty print a row of real or complex numbers.
 
@@ -1375,7 +1378,10 @@ def pretty_row_print(X,msg="",sigfigs=None,decimals=3,complex_decimals=2):
             out.append(fmt_real(x.real))
 
     row = msg + " " + ", ".join(out)
-    display(Markdown(row))
+    if verbose:
+        return row
+    else:
+        display(Markdown(row))
 
 def feedback_ff(G, K, Kff):
     if isinstance(G, (int, float, np.number)):
@@ -2069,19 +2075,19 @@ def build_frac_latex_gain_in_numer(Kn, num_body, Kd, den_body, sigfigs=4, Tol=1e
     # denominator only
     if nb is None:
         if abs(K - 1) < Tol:
-            return rf"\frac{{1}}{{{db}}}"
+            return rf"\dfrac{{1}}{{{db}}}"
         elif abs(K + 1) < Tol:
-            return rf"-\frac{{1}}{{{db}}}"
+            return rf"-\dfrac{{1}}{{{db}}}"
         else:
-            return rf"\frac{{{Ktex}}}{{{db}}}"
+            return rf"\dfrac{{{Ktex}}}{{{db}}}"
 
     # full fraction
     if abs(K - 1) < Tol:
-        return rf"\frac{{{nb}}}{{{db}}}"
+        return rf"\dfrac{{{nb}}}{{{db}}}"
     elif abs(K + 1) < Tol:
-        return rf"-\frac{{{nb}}}{{{db}}}"
+        return rf"-\dfrac{{{nb}}}{{{db}}}"
     else:
-        return rf"\frac{{{Ktex}\,{nb}}}{{{db}}}"
+        return rf"\dfrac{{{Ktex}\,{nb}}}{{{db}}}"
 
 def group_real_roots(real_roots, tol=1e-6):
     groups = []
@@ -2145,7 +2151,7 @@ def _poly_to_latex(coefs, sigfigs=4, var="s", discrete=False, Tol = 1e-12):
 
     for i, val in enumerate(coefs):
 
-        if abs(val) < 1e-12:
+        if abs(val) < Tol:
             continue
 
         # sign and magnitude
@@ -2153,7 +2159,7 @@ def _poly_to_latex(coefs, sigfigs=4, var="s", discrete=False, Tol = 1e-12):
         mag = abs(val)
 
         # format once to significant figures
-        coeff_str = f"{mag:.{sigfigs}g}"
+        coeff_str = f"{mag:.{sigfigs}f}"
         coeff_str = _sci_to_latex(coeff_str)
 
         if discrete:
@@ -2165,9 +2171,9 @@ def _poly_to_latex(coefs, sigfigs=4, var="s", discrete=False, Tol = 1e-12):
         else:
             degree = n - 1 - i
             if degree > 1:
-                term_body = rf"{'' if coeff_str == '1' else coeff_str}{var}^{degree}"
+                term_body = rf"{'' if abs(mag-1.0)<Tol else coeff_str}{var}^{degree}"
             elif degree == 1:
-                term_body = rf"{'' if coeff_str == '1' else coeff_str}{var}"
+                term_body = rf"{'' if abs(mag-1.0)<Tol else coeff_str}{var}"
             else:
                 term_body = coeff_str
 
