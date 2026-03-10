@@ -41,7 +41,7 @@ def time_to_pole_specs(Mp, Tr, Tp, Ts, verbose=False):
         wd = np.pi / Tp
         info.append(
             r"The damped natural frequency $\omega_d$ is obtained from the peak time $T_p$ using "
-            r"\[T_p = \frac{\pi}{\omega_d}\quad \Rightarrow \quad\omega_d = \frac{\pi}{T_p} .\]")
+            rf"\[T_p = \frac{{\pi}}{{\omega_d}}\quad \Rightarrow \quad\omega_d = \frac{{\pi}}{{{Tp:.3f}}} = {wd:.3f}.\]")
     else:
         wd = None
 
@@ -59,7 +59,10 @@ def time_to_pole_specs(Mp, Tr, Tp, Ts, verbose=False):
             wn = wd / np.sqrt(1 - zeta**2)
             info.append(
                 r"When $\omega_d$ and $\zeta$ are known, the natural frequency is recovered using "
-                r"\[\omega_d = \omega_n \sqrt{1-\zeta^2}\quad \Rightarrow \quad\omega_n = \frac{\omega_d}{\sqrt{1-\zeta^2}} .\]")
+                rf"\[\omega_d = \omega_n \sqrt{{1-\zeta^2}} \quad \Rightarrow \quad "
+                rf"\omega_n = \frac{{\omega_d}}{{\sqrt{{1-\zeta^2}}}} "
+                rf"= \frac{{{wd:.3f}}}{{\sqrt{{1-{zeta:.3f}^2}}}} = {wn:.3f}.\]"
+            )
         elif (sigma is not None) and (zeta is not None):
             wn = sigma / zeta
             info.append(
@@ -116,7 +119,7 @@ def time_to_pole_specs(Mp, Tr, Tp, Ts, verbose=False):
     for k, v in items:
         if v is not None:
             if isinstance(v, (int, float, np.floating)):
-                parts.append(f"{k}: {v:4.2f}")
+                parts.append(f"{k}: {v:.3f}")
             else:
                 parts.append(f"{k}: {v}")
 
@@ -124,7 +127,7 @@ def time_to_pole_specs(Mp, Tr, Tp, Ts, verbose=False):
     display(Markdown(msgs))
     info.append(msgs)
 
-    msgs = rf"As a result, the target pole locations are $s_{{target}}={-sigma:.3f} \pm {wdf:.3f}i$."
+    msgs = rf"As a result, the target pole locations are $s_{{target}}={-sigma:.3f} \pm {wdf:.3f}j$."
     info.append(msgs)
     
     info_str = None
@@ -134,7 +137,7 @@ def time_to_pole_specs(Mp, Tr, Tp, Ts, verbose=False):
     return wn, zeta, info_str
 
 def design_process(G, Mp = None, Tr = None, Tp = None, Ts = None, ess_step = None, 
-    ess_ramp = np.inf, gamma = 10, max_iter = 1, make_plots = False, 
+    ess_ramp = np.inf, gamma = 10, check_ramp = False, max_iter = 1, make_plots = False, 
     file_prefix = "Rec6_des", s_cancel=None, verbose=False):
     ''' design_process(G, Mp = None, Tr = None, Tp = None, Ts = None, ess_step = None, ess_ramp = np.inf, 
         gamma = 10, max_iter = 1, make_plots = False)
@@ -160,15 +163,17 @@ def design_process(G, Mp = None, Tr = None, Tp = None, Ts = None, ess_step = Non
     info.error = None
     info.latex = None
     info.lag_latex = None
+    lag_latex_paragraph = None
 
     Gc_lead = None
     Gc_lag = ct.tf(1,1)
     G_type = cm.system_type(G)
 
-    check_ramp = False
+    fix_ramp = False
     if ess_ramp < np.inf:
         print("Ramp steady state error specified")
-        check_ramp = True        
+        fix_ramp = True        
+        check_ramp = True
 
     wn, zeta, info_str = time_to_pole_specs(Mp, Tr, Tp, Ts, verbose=verbose)
     info.latex = info_str
@@ -187,7 +192,7 @@ def design_process(G, Mp = None, Tr = None, Tp = None, Ts = None, ess_step = Non
     
     #################################################################################################
     #################################################################################################
-    if (G_type == 0 and check_ramp): # must add integrator
+    if (G_type == 0 and fix_ramp): # must add integrator
         print("\nAdding integrator to plant for design")
         G_pert = ct.tf(1,[1,0])
     else:
@@ -214,7 +219,7 @@ def design_process(G, Mp = None, Tr = None, Tp = None, Ts = None, ess_step = Non
             ess_step_orig = 0
         print(f"\nStep steady state error for lead design -- e_ss step: {ess_step_orig:.3f}")    
 
-        if check_ramp:
+        if fix_ramp:
             ess_ramp_orig = find_ess(L_lead, type = 'ramp')
             print(f"e_ss ramp: {ess_ramp_orig:.2f}")    
 
@@ -253,18 +258,18 @@ def design_process(G, Mp = None, Tr = None, Tp = None, Ts = None, ess_step = Non
                 rf"and the pole at "
                 rf"$p_l = \frac{{z_l}}{{\beta}} = {p_lag:.2f}$. "
                 rf"The resulting lag compensator transfer function is "
-                rf"$$G_c^{{\mathrm{{lag}}}}(s) = \dfrac{{s + {-z_lag:.3f}}}{{s + {-p_lag:.3f}}}.$$"
+                rf"$$G_c^{{\mathrm{{lag}}}}(s) = \dfrac{{s + {z_lag:.3f}}}{{s + {p_lag:.3f}}}.$$"
             )
             info.lag_latex = lag_latex_paragraph
 
-            if check_ramp:
+            if fix_ramp:
                 ess_ramp_lag = find_ess(L_lag, type = 'ramp')
                 print(f"e_ss ramp: {ess_ramp_lag:.3f}")    
             else:
                 ess_step_lag = find_ess(L_lag, type='step')
                 print(f"e_ss step: {ess_step_lag:.3f}")    
                 
-        elif check_ramp and ess_ramp_orig > ess_ramp:
+        elif fix_ramp and ess_ramp_orig > ess_ramp:
             print("\nAdding lag compensator for Ramp error")
             Kv_desired = 1/ess_ramp 
             Kv_lead = cm.find_Kv(L_lead)
@@ -291,6 +296,18 @@ def design_process(G, Mp = None, Tr = None, Tp = None, Ts = None, ess_step = Non
             print(f"e_ss step: {ess_step_lag:.3f}")    
             ess_ramp_lag = find_ess(L_lag, type = 'ramp')
             print(f"e_ss ramp: {ess_ramp_lag:.3f}")    
+
+            lag_latex_paragraph = (
+                rf"The desired ramp steady-state error of $e_{{ss}} = {ess_ramp:.2f}$ requires "
+                rf"$K_v^{{\mathrm{{desired}}}} = {Kv_desired:.2f}$, whereas the current system (system $G$ and lead if needed) has "
+                rf"$K_v = {Kv_lead:.2f}$, requiring an increase by a ratio of "
+                rf"$\beta = K_v^{{\mathrm{{desired}}}}/K_v = {Kv_ratio:.2f}$ which specifies the lag zero -- pole ratio $\beta = z/p$. "
+                rf"The zero is placed at $z_{{lag}} = \frac{{|s_{{target}}|}}{{\gamma}} = \frac{{{np.abs(s_target):.3f}}}{{{gamma}}} = {z_lag:.2f}$ "
+                rf"and the pole at $p_{{lag}} = \frac{{z_{{lag}}}}{{\beta}} = {p_lag:.2f}$. "
+                rf"The resulting lag compensator transfer function is "
+                rf"$$G_c^{{\mathrm{{lag}}}}(s) = \dfrac{{s + {z_lag:.3f}}}{{s + {p_lag:.3f}}}.$$"
+            )
+
         else:
             print("No lag compensator needed")
             Gc_lag = None
@@ -307,13 +324,6 @@ def design_process(G, Mp = None, Tr = None, Tp = None, Ts = None, ess_step = Non
         ax1.plot(scl_lag.real,-scl_lag.imag,'cs',ms=8)
         ax1.plot(s_target.real,s_target.imag,'md',ms=8)
         ax1.plot(s_target.real,-s_target.imag,'md',ms=8)
-        ax1.set_xlabel('Real')
-        ax1.set_ylabel('Imaginary')
-        ax1.set_title('K > 0',loc='left')
-        try:
-            plt.title(r'$\gamma={:3.1f}$'.format(gamma),loc='right')
-        except:
-            pass
         ax1.plot(np.real(Gc_lead.zeros()), np.imag(Gc_lead.zeros()), 'go', ms=8, label='Lead Zero')
         ax1.plot(np.real(Gc_lead.poles()), np.imag(Gc_lead.poles()), 'rx', ms=8, label='Lead Pole')
         if Gc_lag is not None:
@@ -327,32 +337,42 @@ def design_process(G, Mp = None, Tr = None, Tp = None, Ts = None, ess_step = Non
             ax1.text(0.05, 0.75, f'Lag Zero: {np.real(-Gc_lag.zeros())[0]:.2f}', transform=ax1.transAxes, fontsize=8, color='black', verticalalignment='top')
             ax1.text(0.05, 0.7, f'Lag Pole: {np.real(-Gc_lag.poles())[0]:.2f}', transform=ax1.transAxes, fontsize=8, color='magenta', verticalalignment='top')
 
+
         # Insert to lower right of ax1 that plots the root locus near the origin
         ax_inset = ax1.inset_axes([0.75, 0.15, 0.2, 0.2])
-        rl =  ct.rlocus(L_lag, gains=cm.Root_Locus_gains(L_lag, np.logspace(-3, 1, num=1500)), color='b', ax=ax_inset)
-        ax_inset.plot(s_target.real, s_target.imag, 'md', ms=4)
-        ax_inset.plot(s_target.real, -s_target.imag, 'md', ms=4)
-        ax_inset.plot(scl_lag.real, scl_lag.imag, 'cs', ms=4)
-        ax_inset.plot(scl_lag.real, -scl_lag.imag, 'cs', ms=4)
-        ax_inset.plot(np.real(Gc_lead.zeros()), np.imag(Gc_lead.zeros()), 'go', ms=4, label='Lead Zero')
-        ax_inset.plot(np.real(Gc_lead.poles()), np.imag(Gc_lead.poles()), 'rx', ms=4, label='Lead Pole')
-
+        rl =  ct.rlocus(L_lag, gains=cm.Root_Locus_gains(L_lag, np.logspace(-3, 1, num=1000)), color='b', ax=ax_inset)
+        ax_inset.plot(s_target.real, s_target.imag, 'md', ms=8)
+        ax_inset.plot(s_target.real, -s_target.imag, 'md', ms=8)
+        ax_inset.plot(scl_lag.real, scl_lag.imag, 'cs', ms=8)
+        ax_inset.plot(scl_lag.real, -scl_lag.imag, 'cs', ms=8)
+        ax_inset.plot(np.real(Gc_lead.zeros()), np.imag(Gc_lead.zeros()), 'go', ms=8, label='Lead Zero',zorder=10)
+        ax_inset.plot(np.real(Gc_lead.poles()), np.imag(Gc_lead.poles()), 'rx', ms=8, label='Lead Pole',zorder=10)
         if Gc_lag is not None:
-            ax_inset.plot(np.real(Gc_lag.zeros()), np.imag(Gc_lag.zeros()), 'yo', ms=4, label='Lag Zero')
-            ax_inset.plot(np.real(Gc_lag.poles()), np.imag(Gc_lag.poles()), 'mx', ms=4, label='Lag Pole')
+            ax_inset.plot(np.real(Gc_lag.zeros()), np.imag(Gc_lag.zeros()), 'yo', ms=8, label='Lag Zero',zorder=10)
+            ax_inset.plot(np.real(Gc_lag.poles()), np.imag(Gc_lag.poles()), 'mx', ms=8, label='Lag Pole',zorder=10)
 
-        scale = np.ceil(np.abs(s_target.real))*3
+        scale = np.ceil(np.abs(s_target)*1)
         offset = np.sum(G.poles().real)/len(G.poles())
+        shrink = 10
         ax_inset.axis('equal')
-        ax_inset.set_xlim((-scale/5+s_target.real,scale/5+s_target.real))
-        ax_inset.set_ylim([-scale/5, scale/5])
+        inset_max_x = max(scale/shrink+s_target.real,1)
+        ax_inset.set_xlim((-scale/shrink*2 + inset_max_x,inset_max_x))
+        ax_inset.set_ylim([-scale/shrink, scale/shrink])
         bm.nicegrid(ax_inset)
 
         ax1.axis('equal')
         ax1.set_xlim((-scale+s_target.real,scale+s_target.real))
         ax1.set_ylim([-scale, scale])
-        # Create custom legend handles
+        bm.nicegrid(ax1)
+        ax1.set_xlabel('Real')
+        ax1.set_ylabel('Imaginary')
+        ax1.set_title('K > 0',loc='left')
+        try:
+            plt.title(r'$\gamma={:3.1f}$'.format(gamma),loc='right')
+        except:
+            pass
 
+        # Create custom legend handles
         if Gc_lag is None:
             custom_lines = [
                 Line2D([0], [0], color='blue', lw=2, linestyle='-'),
@@ -377,8 +397,8 @@ def design_process(G, Mp = None, Tr = None, Tp = None, Ts = None, ess_step = Non
             # Add legend with custom handles
             ax1.legend(custom_lines, ['Root Locus', 'Desired CLP', 'Lag CLP', 'Lead Zero', 
                 'Lead Pole', 'Lag Zero', 'Lag Pole'], loc='upper right',fontsize=8)
+            ax_inset.legend(custom_lines,[])
 
-        bm.nicegrid(ax1)
         if make_plots:
             plt.savefig("./figs/"+file_prefix+str(iter_count)+"_RL.pdf", dpi=600)
 
@@ -388,9 +408,8 @@ def design_process(G, Mp = None, Tr = None, Tp = None, Ts = None, ess_step = Non
         y_lag,t_lag = cmat.step(ct.tf2ss(Gcl_lag),T=t)
 
         fig, ax2 = plt.subplots(1,figsize=(8,5),dpi=150,constrained_layout = True)
-        ax2.plot(t_lag, y_lag,'b')
         ST = cm.Step_info(t_lag, y_lag)
-        ST.nice_plot(ax2,Tmax=np.ceil(2*Ts_pred))
+        ST.nice_plot(ax2,Tmax=np.ceil(2*Ts_pred),lc='b')
         ax2.set_xlim(0, np.ceil(2*Ts_pred))
         ax2.set_title('Step Response of Gcl')
         ax2.set_title(f'Design {iter_count}', loc='left')
@@ -398,8 +417,12 @@ def design_process(G, Mp = None, Tr = None, Tp = None, Ts = None, ess_step = Non
         if make_plots:
             plt.savefig("./figs/"+file_prefix+str(iter_count)+"_step.pdf", dpi=600)
 
-        if check_ramp:
-            factor = 100
+        if check_ramp: # used to check ramp perf regardless lag design effort
+            if ess_ramp < np.inf:
+                factor = 10**(-int(np.log10(ess_ramp))) # scaling factor on ramp error to make it observable on plot
+            else:
+                factor = 100
+                
             fig, ax3 = plt.subplots(1,figsize=(8,5),dpi=150)
             Tramp_pred = np.abs(4/(np.real(s_target)))
             # Plot step response
@@ -415,7 +438,11 @@ def design_process(G, Mp = None, Tr = None, Tp = None, Ts = None, ess_step = Non
             ax3.set_ylabel('Response')
             ax3.grid(True)
             ax3.axhline(y=factor*ess_ramp, color='k', linestyle='--')
-            ax3.legend(('Lag','Lag Err','Lead','Lead Err'),fontsize=8)
+            ax3.legend((
+                    'Lag',
+                    fr'${factor:.0f}\times$ Lag Err',
+                    'Lead',
+                    fr'${factor:.0f}\times$ Lead Err'),fontsize=8)
             ax3.set_title(f'Design {iter_count}', loc='left')
             if make_plots:
                 plt.savefig("./figs/"+file_prefix+str(iter_count)+"_ramp_lag.pdf", dpi=600)
@@ -427,8 +454,10 @@ def design_process(G, Mp = None, Tr = None, Tp = None, Ts = None, ess_step = Non
         if Gc_lag is not None:
             cm.show_tf_latex(Gc_lag, "G_{c_{lag}}(s)",show=True,factor=True)
 
+        info.s_target = s_target
         info.Gc_lead = Gc_lead
         info.lead_info = lead_info
+        info.lag_info = lag_latex_paragraph
         info.Gc_lag = Gc_lag
         info.Gc = Gc
     return info

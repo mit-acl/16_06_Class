@@ -325,11 +325,12 @@ def Root_Locus_design_cancel(G, s_target=complex(-1, 2), s_cancel=-1, verbose=Fa
             rf"$\phi_G = {phi_fromG:.2f}^\circ$. A compensator zero placed at $z = {Gczeros[0]:.2f}$ contributes an additional phase of "
             rf"$\phi_{{Gc,z}} = {phi_from_Gc_zero:.2f}^\circ$. Enforcing the root-locus angle condition "
             rf"$\angle G(s_{{target}}) + \angle G_c(s_{{target}}) = -180^\circ$, the (absolute value of the) required phase from the compensator pole is "
+            rf"$\phi_{{required}} = {phi_required:.2f}$ degs. Noting that" 
             rf"$$\phi_{{required}} = \arctan\!\left(\frac{{Im\{{s_{{target}}\}}}}{{Re\{{s_{{target}}\}} + P}}\right) \qquad \Rightarrow \qquad "
             rf"P = -Re\{{s_{{target}}\}} + \frac{{Im\{{s_{{target}}\}}}}{{\tan(\phi_{{required}})}}$$ "            
-            rf"so that, with $\phi_{{required}} = {phi_required:.2f}$ degs, the compensator pole is at $P = {P:.3f}$. This yields the compensator $G_c(s) = k_c\dfrac{{s + {-Gczeros[0]:.2f}}}{{s + {P:.2f}}}$, and" 
+            rf"with $\phi_{{required}} = {phi_required:.2f}$ degs, the compensator pole is at $P = {P:.3f}$. This yields the compensator $G_c^{{lead}}(s) = k_c\frac{{s + {-Gczeros[0]:.3f}}}{{s + {P:.3f}}}$, and" 
             rf" the compensator gain is selected to satisfy $$|G(s_{{target}})G_c(s_{{target}})| = 1,$$ resulting in a gain of $k_c = {Gain:.3f}$, so that"
-            rf"$$G_c(s) = {Gain:.2f}\dfrac{{s + {-Gczeros[0]:.2f}}}{{s + {P:.2f}}}$$" 
+            rf"$$G_c^{{lead}}(s) = {Gain:.3f}\dfrac{{s + {-Gczeros[0]:.3f}}}{{s + {P:.3f}}}$$" 
         )
         info = SimpleNamespace(
             phi_from_G=phi_fromG,
@@ -1548,7 +1549,7 @@ def write_latex_array(X, filename, msgs=None, cols=1, tol=1e-12, decimals=None, 
             f.write("  " + " & ".join(r) + " \\\\\n")
         f.write("\\end{array}\n")
 
-def show_tf_latex(P, label=None, sigfigs=2, show=None, factor=False,
+def show_tf_latex(P, label=None, sigfigs=2, show=True, factor=False,
                   name=None, time_constant=False):
     ''' 
     P: system
@@ -1557,6 +1558,9 @@ def show_tf_latex(P, label=None, sigfigs=2, show=None, factor=False,
     factor
     time_constant: if True, normalize first order real factors to (s/a + 1)
     '''
+
+    if P is None:
+        return f"G"
 
     is_discrete = P.dt is not None and P.dt > 0
     var = "z" if is_discrete else "s"
@@ -1625,7 +1629,7 @@ def show_tf_latex(P, label=None, sigfigs=2, show=None, factor=False,
 
     latex_str = rf"${label} = {frac}$"
 
-    if show:
+    if show is True:
         display(Math(latex_str))
         return None
 
@@ -2296,6 +2300,10 @@ def write_latex_constants(S0, filename="./figs/constants.tex", idname=None, fmt=
 def write_tf_latex(G, filename, label, sigfigs=4,
                    factor=False, inline=False,
                    name=None, time_constant=False,show=False):
+
+    if show:
+        show_tf_latex(G,label=label,sigfigs=sigfigs,show=True,
+        factor=factor,name=name,time_constant=time_constant)
 
     latex_str = show_tf_latex(G,label=label,sigfigs=sigfigs,show=False,
         factor=factor,name=name,time_constant=time_constant)
