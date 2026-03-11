@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from typing import List
 from IPython.display import Math, display, Markdown, Latex
 
-import scipy.linalg
+#import scipy.linalg
 from scipy.linalg import solve_continuous_lyapunov, svd, sqrtm, cholesky, eigvals, eigh # symmetric matrices
 from scipy.signal import residue
 import re
@@ -111,17 +111,19 @@ def Root_Locus_gains(L, Krange=None, Tol=1e-5, standard_locus=True, Tol_max=1e3,
     verbose - enables additional return of break info
     debug - extensive on screen information
     """
-    # Basic checks
-    if not isinstance(L, ct.TransferFunction):
+    if not isinstance(L, ct.TransferFunction):     # Basic checks
         raise TypeError("Root_Locus_gains expects a control.TransferFunction (SISO).")
 
     if Krange is None:
-        # provide positive or negative range of K values
-        Krange = (2 * standard_locus - 1) * np.logspace(-3, 3, num=2000)
-    Krange = np.sort(np.append(Krange, 0))  # add zero
+        Krange = np.logspace(-3, 3, num=2000)
 
-    break_info = [] 
-    
+    Krange = np.asarray(Krange, dtype=float)     # Ensure numpy array
+    Krange = np.concatenate((Krange, [0.0]))     # Add zero
+    if not standard_locus:     # Flip sign if needed
+        Krange = -Krange
+    Krange = np.sort(Krange)
+
+    break_info = [] # locations and gains of the break pts 
     @dataclass
     class BreakPoint:
         K: float
@@ -924,32 +926,45 @@ def caption(txt, fig=None, xloc=0.5, yloc=-0.05):
         fig = plt.gcf()
     fig.text(xloc, yloc, txt, ha="center", size=MEDIUM_SIZE, color="blue")
 
-def new_pzmap(G, ax = None, title = None, ms = 6):
-    '''PZ map with nicer markers for the poles/zeros
-    Inputs:
-        G - system
-        ax - figure axis, returned if not provided
-        title
-    '''
-    return_ax = False
+def new_pzmap(arg1, arg2=None, title="Pole-Zero Map", ms=6):
+    """
+    Flexible pole-zero map.
+    Works as:
+        new_pzmap(G)
+        new_pzmap(G, ax)
+        new_pzmap(ax, G)
+    Returns (fig, ax).
+    """
+
+    # Detect argument order
+    if hasattr(arg1, "plot"):        # first arg is axis
+        ax = arg1
+        G = arg2
+    else:                            # first arg is system
+        G = arg1
+        ax = arg2
+
+    if G is None:
+        raise ValueError("System G must be provided.")
+
+    # Create axis if needed
     if ax is None:
-        fig, ax = plt.subplots(figsize=(5, 5))
-        return_ax = True
-    
-    ax.plot(np.real(G.poles()), np.imag(G.poles()), "bx", ms=ms,zorder=1)
-    ax.plot(np.real(G.zeros()), np.imag(G.zeros()), "o", ms=ms, 
-        markeredgewidth=2,markeredgecolor="r", markerfacecolor="r",zorder=10)
+        _, ax = plt.subplots(figsize=(5, 5))
+
+    poles = G.poles()
+    zeros = G.zeros()
+
+    ax.plot(np.real(poles), np.imag(poles), "bx", ms=ms, zorder=1)
+    ax.plot(np.real(zeros), np.imag(zeros), "ro", ms=ms,
+            markeredgewidth=2, zorder=10)
+
     ax.set_xlabel("Real")
     ax.set_ylabel("Imaginary")
-
-    if title is None:
-        ax.set_title("Pole-Zero Map")
-    else:
-        ax.set_title(title)
+    ax.set_title(title)
     ax.grid(True)
+    ax.axis("equal")
 
-    if return_ax:
-        return ax
+    return ax
 
 def color_rl(ax, ms=6, lw=1.75, verbose=False):
     """
