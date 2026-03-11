@@ -962,7 +962,6 @@ def new_pzmap(arg1, arg2=None, title="Pole-Zero Map", ms=6):
     ax.set_ylabel("Imaginary")
     ax.set_title(title)
     ax.grid(True)
-    ax.axis("equal")
 
     return ax
 
