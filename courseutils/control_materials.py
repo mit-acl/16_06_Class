@@ -5,7 +5,7 @@ Control utilities for 16.06.
 All environment/setup is opt-in via setup_environment().
 """
 
-__version__ = "16.06-0.5"
+__version__ = "16.06-0.6"
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -733,20 +733,17 @@ def system_type(L, tol=1e-9):
     return sum(abs(p) < tol for p in poles)
 
 def static_error_constant(L, order):
-    """
-    Compute Kp (order=0), Kv (order=1), Ka (order=2).
-    Returns None if not defined.
-    """
     stype = system_type(L)
 
     if order < stype:
-        return 0.0
+        return np.inf
     if order > stype:
-        return None
+        return 0.0
 
-    s = 1e-6
-    val = (s**order) * L(s)
-    return float(np.real(val))
+    s = ct.tf([1, 0], [1])
+    expr = (s**order) * L
+    expr = ct.minreal(expr, verbose=False)
+    return float(expr.dcgain())
 
 def find_Kp(L):
     return static_error_constant(L, order = 0)
