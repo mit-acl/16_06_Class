@@ -16,7 +16,7 @@ import control.matlab as cmat
 import importlib.util
 from dataclasses import dataclass
 from typing import List
-from IPython.display import Math, display, Markdown, Latex
+from IPython.display import Math, display, Markdown, Latex, HTML
 
 #import scipy.linalg
 from scipy.linalg import solve_continuous_lyapunov, svd, sqrtm, cholesky, eigvals, eigh # symmetric matrices
@@ -841,6 +841,9 @@ def find_wpi(omega, G, phi=np.pi, find_all=False, rtol=0.01):
     Gf, omega = _eval_Gjw(G, omega)
 
     phase = np.angle(Gf)
+    if np.abs(phi) > np.pi:
+        print("Converting phase to radians")
+        phi = phi*np.pi/180.0
     phase_err = np.abs(np.angle(np.exp(1j * (phase - phi))))
 
     if not find_all:
@@ -1338,18 +1341,21 @@ def balred(G, order = None, DCmatch = False, check = False, method = None, Tol=1
 
     return Gr if is_ss else ct.ss2tf(Gr)
 
-def pretty_row_print(X,msg="",sigfigs=None,decimals=3,complex_decimals=2,verbose=None):
+def pretty_row_print(X,msg="",sigfigs=None,decimals=3,complex_decimals=2,verbose=None,bracket=None):
     """
     Pretty print a row of real or complex numbers.
 
     Exactly one of sigfigs or decimals should be used.
     """
 
+    if isinstance(X, str):     # detect swapped arguments
+        X, msg = msg, X
+
     if sigfigs is not None:
         decimals = None 
 
     # normalize scalar to 1 element array
-    X = np.atleast_1d(X)
+    X = np.asarray(X).squeeze().ravel()
 
     def fmt_real(x):
         if sigfigs is not None:
@@ -1389,11 +1395,25 @@ def pretty_row_print(X,msg="",sigfigs=None,decimals=3,complex_decimals=2,verbose
         else:
             out.append(fmt_real(x.real))
 
-    row = msg + " " + ", ".join(out)
+
+    body = ", ".join(out)
+
+    if bracket is None:
+        row = f"{msg} {body}".strip()
+    else:
+        if isinstance(bracket, str):
+            if len(bracket) != 2:
+                raise ValueError("bracket must be 2 chars like '[]'")
+            left, right = bracket
+        else:
+            left, right = bracket
+
+        row = f"{msg} {left}{body}{right}".strip()
+
     if verbose:
         return row
     else:
-        display(Markdown(row))
+        display(HTML(f"<pre style='font-size:14px'>{row}</pre>"))
 
 def feedback_ff(G, K, Kff):
     if isinstance(G, (int, float, np.number)):
