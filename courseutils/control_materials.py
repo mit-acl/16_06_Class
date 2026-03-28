@@ -355,6 +355,8 @@ def phase_at_freq(G,s0,modulation = None):
     else:
         return phi_fromG % 360
 
+###########################################################################################
+###########################################################################################
 def Root_Locus_design_ratio(G, s_target=complex(-1, 2), gamma=10, verbose=False, indx=None):
     """
     Root locus design using zero/pole ratio gamma.
@@ -435,6 +437,8 @@ def Root_Locus_design_ratio(G, s_target=complex(-1, 2), gamma=10, verbose=False,
     else:
         return Gc, Gcl.poles()
 
+###########################################################################################
+###########################################################################################
 def Root_Locus_design_PD(G, s_target=complex(-1, 2), verbose=False, Tol=1e-5):
     """
     PD design to place CL poles at s_target.
@@ -467,10 +471,8 @@ def Root_Locus_design_PD(G, s_target=complex(-1, 2), verbose=False, Tol=1e-5):
     else:
         return Gc, Gcl.poles()
 
-# -------------------------------
-# Step info class (keeps API but safer)
-# -------------------------------
-
+###########################################################################################
+###########################################################################################
 def max_overshoot(t, y, yss=None):
     """
     Compute maximum overshoot Mp and peak time Tp from step response.
@@ -507,6 +509,8 @@ def max_overshoot(t, y, yss=None):
 
     return Mp, Tp
 
+###########################################################################################
+###########################################################################################
 def settling_time(t, y, tol=0.02, t0=0):
     """
     Compute Tol=2% settling time.
@@ -527,6 +531,8 @@ def settling_time(t, y, tol=0.02, t0=0):
         return np.nan  # never settles within simulation time
     return t[last_outside + 1]
 
+###########################################################################################
+###########################################################################################
 def rise_time(t, y, yss=None, limits=(0.1, 0.9), t0=0.0):
     """
     Robust rise time computation using linear interpolation.
@@ -587,6 +593,8 @@ def rise_time(t, y, yss=None, limits=(0.1, 0.9), t0=0.0):
     Tr = t_hi - t_lo
     return Tr, (t_lo - t0, t_hi - t0)
 
+###########################################################################################
+###########################################################################################
 class Step_info:
     def __init__(self, t, y, method=0, t0=0, SettlingTimeLimits=None, RiseTimeLimits=(0.1, 0.9)):
         self.t = np.asarray(t)
@@ -674,14 +682,13 @@ class Step_info:
         ax.text(min(self.Tp * 1.1, Tmax/2), min(self.Yss * (1 + self.Mp),0.8*Ymax), f"Mp = {self.Mp:.2f}", fontsize=SMALL_SIZE)
         ax.text(min(self.Ts, Tmax/2), min(self.Yss * 1.1,0.9*Ymax), rf"$e_{{ss}}$ = {1 - self.Yss:.3f}", fontsize=SMALL_SIZE, color="purple")
 
-# -------------------------------
-# More utilities
-# -------------------------------
-
+###########################################################################################
+###########################################################################################
 def lead_design(G, wc_des = 1, PMdes = 45, verbose=None):
-
-    j = complex(0,1)
-    Gf = G(j*wc_des)
+    """
+    Frequency Domain Lead Design
+    """
+    Gf = G(1j*wc_des)
     phi_G = wrap_phase_neg(np.angle(Gf)) * r2d # phase of plant at wc (degs)
     PM =  wrap(180.0 + phi_G)
 
@@ -714,8 +721,12 @@ def lead_design(G, wc_des = 1, PMdes = 45, verbose=None):
     else:
         return Gc_lead
 
+###########################################################################################
+###########################################################################################
 def lag_design(gain_inc=10, gamma=10, wc=1, verbose=False):
-
+    """
+    Frequency Domain Lag Design
+    """
     zl = float(wc / gamma)
     pl = float(zl / gain_inc)
     if verbose:
@@ -727,6 +738,8 @@ def lag_design(gain_inc=10, gamma=10, wc=1, verbose=False):
     else:
         return ct.tf([1, zl], [1, pl])
 
+###########################################################################################
+###########################################################################################
 def system_type(L, tol=1e-9):
     """
     Number of poles at the origin.
@@ -771,6 +784,8 @@ def hf_gain(G):
     else:
         return num[0] / den[0]
 
+###########################################################################################
+###########################################################################################
 def _eval_Gjw(G, omega):
     '''Handle the different formats that a system model might be given'''
     if isinstance(G, (ct.TransferFunction, ct.StateSpace)):
@@ -782,6 +797,8 @@ def _eval_Gjw(G, omega):
 
     return np.atleast_1d(Gf), np.asarray(omega)
 
+###########################################################################################
+###########################################################################################
 def find_wc(omega, G, mag=1.0, find_all=False, rtol=0.01):
     """
     Find frequency where |G(jω)| is closest to `mag`.
@@ -828,6 +845,8 @@ def find_wc(omega, G, mag=1.0, find_all=False, rtol=0.01):
 
     return omega[idx], idx
 
+###########################################################################################
+###########################################################################################
 def find_wpi(omega, G, phi=np.pi, find_all=False, rtol=0.01):
     """
     Find frequency where arg(G(jw)) = phi (degrees)
@@ -861,6 +880,8 @@ def find_wpi(omega, G, phi=np.pi, find_all=False, rtol=0.01):
 
     return omega[idx], idx
 
+###########################################################################################
+###########################################################################################
 def find_PM(omega, G, mag=1.0, wc=None):
     """
     Compute phase margin from frequency response.
@@ -898,6 +919,8 @@ def find_PM(omega, G, mag=1.0, wc=None):
 
     return PM, wc, idx
 
+###########################################################################################
+###########################################################################################
 def Departure_angle(L,s0,Tol=1e-4):
     '''Departure angle in degrees
     Inputs:
@@ -909,6 +932,8 @@ def Departure_angle(L,s0,Tol=1e-4):
                 -sum([np.angle(x, deg=True) for x in (s0 - L.poles()) if np.abs(x) > Tol])) % 360 
     return phi_d
 
+###########################################################################################
+###########################################################################################
 def Arrival_angle(L,s0,Tol=1e-4):
     '''Arrival angle in degrees
     Inputs:
@@ -920,6 +945,8 @@ def Arrival_angle(L,s0,Tol=1e-4):
                 +sum([np.angle(x, deg=True) for x in (s0 - L.poles()) if np.abs(x) > Tol])) % 360
     return phi_a
 
+###########################################################################################
+###########################################################################################
 def caption(txt, fig=None, xloc=0.5, yloc=-0.05):
     """
     Add a centered caption to a figure (below the axes).
@@ -929,6 +956,8 @@ def caption(txt, fig=None, xloc=0.5, yloc=-0.05):
         fig = plt.gcf()
     fig.text(xloc, yloc, txt, ha="center", size=MEDIUM_SIZE, color="blue")
 
+###########################################################################################
+###########################################################################################
 def new_pzmap(arg1, arg2=None, title="Pole-Zero Map", ms=6):
     """
     Flexible pole-zero map.
@@ -968,6 +997,8 @@ def new_pzmap(arg1, arg2=None, title="Pole-Zero Map", ms=6):
 
     return ax
 
+###########################################################################################
+###########################################################################################
 def color_rl(ax, ms=6, lw=1.75, verbose=False):
     """
     Change RL line colors and stacking order.
@@ -1044,9 +1075,13 @@ def color_rl(ax, ms=6, lw=1.75, verbose=False):
                 unique[l] = h
         return unique
 
+###########################################################################################
+###########################################################################################
 def Read_data(file_name, comments=["#", "F"], cols=[0]):
     return np.loadtxt(file_name, comments=comments, delimiter=",", usecols=cols)
 
+###########################################################################################
+###########################################################################################
 def add_break_info(ax, break_info, dim=None, tol=1e-6, delta=None, sigfigs=3):
     """Add the root locus break in/out info to the plot"""
 
@@ -1099,6 +1134,8 @@ def add_break_info(ax, break_info, dim=None, tol=1e-6, delta=None, sigfigs=3):
             f"Gain: {bp.K:.{sigfigs}f} at s = {pole_str}",
             fontsize=8)
 
+###########################################################################################
+###########################################################################################
 def near_zero(P, Tol=1e-12):
     '''remove small terms in the num/den of the TF'''
     if not isinstance(P, ct.TransferFunction):
@@ -1112,12 +1149,16 @@ def near_zero(P, Tol=1e-12):
     den = [x if abs(x) > Tol else 0.0 for x in den]
     return ct.tf(num, den)
 
+###########################################################################################
+###########################################################################################
 def log_interp(zz, xx, yy):
     logz = np.log10(zz)
     logx = np.log10(xx)
     logy = np.log10(yy)
     return np.power(10.0, np.interp(logz, logx, logy))
 
+###########################################################################################
+###########################################################################################
 def pick_model_order_from_hsvs(sigmas,method="combined",energy_thresh=0.95,error_thresh=None):
     """
     Choose truncation order r from sorted HSVs (descending).
@@ -1184,6 +1225,8 @@ def pick_model_order_from_hsvs(sigmas,method="combined",energy_thresh=0.95,error
         return r_err
     return n
 
+###########################################################################################
+###########################################################################################
 def hsv(Wc, Wo, tol_chol=1e-12):
     """
     Return Hankel singular values robustly from controllability Wc and observability Wo gramians.
@@ -1206,6 +1249,8 @@ def hsv(Wc, Wo, tol_chol=1e-12):
         vals = np.clip(vals, 0.0, None)
         return np.sqrt(vals)
 
+###########################################################################################
+###########################################################################################
 def balred(G, order = None, DCmatch = False, check = False, method = None, Tol=1e-9):
     '''
     Balanced Model reduction using both methods discussed here
@@ -1341,6 +1386,8 @@ def balred(G, order = None, DCmatch = False, check = False, method = None, Tol=1
 
     return Gr if is_ss else ct.ss2tf(Gr)
 
+###########################################################################################
+###########################################################################################
 def pretty_row_print(X,msg="",sigfigs=None,decimals=3,complex_decimals=2,verbose=None,bracket=None):
     """
     Pretty print a row of real or complex numbers.
@@ -1415,6 +1462,8 @@ def pretty_row_print(X,msg="",sigfigs=None,decimals=3,complex_decimals=2,verbose
     else:
         display(HTML(f"<pre style='font-size:14px'>{row}</pre>"))
 
+###########################################################################################
+###########################################################################################
 def feedback_ff(G, K, Kff):
     if isinstance(G, (int, float, np.number)):
         G = ct.tf([G], [1])
@@ -1449,6 +1498,8 @@ def feedback_ff(G, K, Kff):
 
     return ct.tf(Kff * NGDC + NGNC, DGDC + NGNC)
 
+###########################################################################################
+###########################################################################################
 def writeGc(filename, Gc):
     """
     Write controller info to filename. Each piece on its own line:
@@ -1580,6 +1631,8 @@ def write_latex_array(X, filename, msgs=None, cols=1, tol=1e-12, decimals=None, 
             f.write("  " + " & ".join(r) + " \\\\\n")
         f.write("\\end{array}\n")
 
+###########################################################################################
+###########################################################################################
 def show_tf_latex(P, label=None, sigfigs=2, show=True, factor=False,
                   name=None, time_constant=False):
     ''' 
@@ -1666,19 +1719,8 @@ def show_tf_latex(P, label=None, sigfigs=2, show=True, factor=False,
 
     return latex_str
 
-if 0:
-    def _num_to_latex(x, sigfigs=4):
-        """
-        Convert a float to LaTeX-safe numeric string.
-        Uses \\times 10^{k} for scientific notation, with clean exponents.
-        """
-        s = f"{x:.{sigfigs}g}"
-        if "e" in s or "E" in s:
-            base, exp = s.replace("E", "e").split("e")
-            exp = int(exp)   # <-- THIS removes leading zeros
-            return rf"{base}\times 10^{{{exp}}}"
-        return s
-
+###########################################################################################
+###########################################################################################
 def _sci_to_latex(s):
     """
     Convert '4.4e-06' -> '4.4 \\times 10^{-6}'
@@ -1688,6 +1730,8 @@ def _sci_to_latex(s):
         return rf"{base} \times 10^{{{int(exp)}}}"
     return s
 
+###########################################################################################
+###########################################################################################
 def tf_to_latex(G, sigfigs=2, factor=False, time_constant=False):
     """
     Backward-compatible wrapper for show_tf_latex.
@@ -1700,25 +1744,8 @@ def tf_to_latex(G, sigfigs=2, factor=False, time_constant=False):
         latex_str = latex_str[1:-1]
     return latex_str
 
-if 0:
-    def tf_to_latex(G):
-        s = sp.Symbol('s')
-        
-        # Get numerator and denominator coefficients
-        num, den = ct.tfdata(G)
-        num = np.atleast_1d(np.squeeze(num))
-        den = np.atleast_1d(np.squeeze(den))
-
-        # Convert to symbolic expressions
-        num_poly = sum(np.round(coef,2) * s**i for i, coef in enumerate(reversed(num)))
-        den_poly = sum(np.round(coef,2) * s**i for i, coef in enumerate(reversed(den)))
-
-        # Create the LaTeX representation
-        G_sym = num_poly / den_poly
-        raw_latex = sp.latex(G_sym)
-        nice_latex = raw_latex.replace(r"\frac", r"\dfrac")     # force displaystyle fractions
-        return nice_latex
-
+###########################################################################################
+###########################################################################################
 def _matrix_to_latex(M, sigfigs=4):
     M = np.atleast_2d(np.array(M, dtype=float))
     rows = []
@@ -1729,6 +1756,8 @@ def _matrix_to_latex(M, sigfigs=4):
     body = r" \\ ".join(rows)
     return r"\begin{bmatrix} " + body + r" \end{bmatrix}"
 
+###########################################################################################
+###########################################################################################
 def show_ss_latex(P, label=None, sigfigs=4, name=None):
     """
     Display a StateSpace system as LaTeX with A, B, C, D matrices.
@@ -1781,37 +1810,16 @@ def show_ss_latex(P, label=None, sigfigs=4, name=None):
     else:
         return Math(eqn)
 
-# ---------- helpers ----------
-if 0:
-    def _build_linear_factor_from_root(root, var='s', Tol=1e-9, sigfigs=4):
-        # For a root r, factor is (var - r) -> printed as (var + a) where a = -r
-        r = complex(root)
-        if abs(r.imag) <= Tol:
-            a = -float(r.real)
-            if abs(a) <= Tol:
-                return var  # plain s
-            if a > 0:
-                return rf"({var} + {fmt(a, sigfigs)})"
-            else:
-                return rf"({var} - {fmt(abs(a), sigfigs)})"
-        else:
-            # complex linear factor (unlikely to print alone for real polynomials)
-            real = fmt(-r.real, sigfigs)
-            imag = fmt(-r.imag, sigfigs)
-            sign = '+' if r.imag < 0 else '-'
-            # show as (s - (a + jb)) with j sign adjusted: (s - (ar + j ai))
-            return rf"({var} - ({fmt(r.real,sigfigs)} {sign} {fmt(abs(r.imag),sigfigs)}j))"
-
+###########################################################################################
+###########################################################################################
 def fmt(x, sigfigs=4, tol=1e-10):
     x = float(x)
     if abs(x) < tol:
         return f"{0:.{sigfigs}f}"
     return f"{x:.{sigfigs}f}"
 
-#def fmt(x, sigfigs=4):
-#    # format float for LaTeX: avoid scientific notation for moderate values
-#    return np.format_float_positional(float(x), precision=sigfigs, trim='-')
-
+###########################################################################################
+###########################################################################################
 def build_frac_latex(Kn, num_body, Kd, den_body, sigfigs=4, tol=1e-8):
     #fmt = lambda x: np.format_float_positional(x, precision=sigfigs, trim='-')
 
@@ -1838,6 +1846,8 @@ def build_frac_latex(Kn, num_body, Kd, den_body, sigfigs=4, tol=1e-8):
 
     return rf"\displaystyle {fmt(K)}\,\dfrac{{{num_body}}}{{{den_body}}}"
 
+###########################################################################################
+###########################################################################################
 def residue_tf(G, time_constant=False, tol=1e-12):
     """
     Partial fraction expansion of transfer function G.
@@ -1879,6 +1889,8 @@ def residue_tf(G, time_constant=False, tol=1e-12):
 
     return np.array(r_tc), np.array(a_vals), k
 
+###########################################################################################
+###########################################################################################
 def factors_to_latex(real_roots, quads, var="s",sigfigs=4, tol=1e-8,time_constant=False):
 
     parts = []
@@ -1955,7 +1967,8 @@ def factors_to_latex(real_roots, quads, var="s",sigfigs=4, tol=1e-8,time_constan
 
     return "1" if not parts else "".join(parts)
 
-# ---------- cancellation helper ----------
+###########################################################################################
+###########################################################################################
 def cancel_common_roots(K_num, roots_num, K_den, roots_den, tol=1e-6):
     """
     Remove common roots between num and den (within tol), update K_num/K_den accordingly.
@@ -1980,6 +1993,8 @@ def cancel_common_roots(K_num, roots_num, K_den, roots_den, tol=1e-6):
     # Simpler: leave K_num/K_den unchanged (they are leading coeffs). Cancelling roots does not change K_total.
     return K_num, remaining_num, K_den, remaining_den
 
+###########################################################################################
+###########################################################################################
 # ---------- build fraction latex ----------
 def build_fraction_latex_from_roots(K_num, roots_num, K_den, roots_den,
                                     var='s', sigfigs=4, Tol=1e-9, cancel=False):
@@ -2047,6 +2062,8 @@ def build_fraction_latex_from_roots(K_num, roots_num, K_den, roots_den,
         return rf"\displaystyle {K_tex}\,\dfrac{{{nb}}}{{{db}}}"
 
 
+###########################################################################################
+###########################################################################################
 def cancel_common_real_roots(rnum, rden, tol=1e-6):
     rnum = list(rnum)
     rden = list(rden)
@@ -2124,6 +2141,8 @@ def build_frac_latex_gain_in_numer(Kn, num_body, Kd, den_body, sigfigs=4, Tol=1e
     else:
         return rf"\dfrac{{{Ktex}\,{nb}}}{{{db}}}"
 
+###########################################################################################
+###########################################################################################
 def group_real_roots(real_roots, tol=1e-6):
     groups = []
     for r in real_roots:
@@ -2135,6 +2154,8 @@ def group_real_roots(real_roots, tol=1e-6):
             groups.append([r])
     return groups
 
+###########################################################################################
+###########################################################################################
 def poly_factors_to_latex(K, real_roots, quads, sigfigs=4):
     terms = []
 
@@ -2173,6 +2194,8 @@ def poly_factors_to_latex(K, real_roots, quads, sigfigs=4):
 
     return body
 
+###########################################################################################
+###########################################################################################
 def _poly_to_latex(coefs, sigfigs=4, var="s", discrete=False, Tol = 1e-12):
     terms = []
 
@@ -2226,6 +2249,8 @@ def _poly_to_latex(coefs, sigfigs=4, var="s", discrete=False, Tol = 1e-12):
 
     return result
 
+###########################################################################################
+###########################################################################################
 def factor_poly_real(coeffs, tol=1e-6):
     """
     coeffs: highest to lowest
@@ -2291,11 +2316,15 @@ def factor_poly_real(coeffs, tol=1e-6):
 
     return K, real_roots, quads
 
+###########################################################################################
+###########################################################################################
 def pid(Kp = 0, Ki = 0, Kd = 0):
     '''return tf form of a PID controller given Kp,Ki,Kd'''
     s = ct.tf((1,0),(1))
     return ct.tf(Kp,1) + Ki/s + Kd*s
 
+###########################################################################################
+###########################################################################################
 def nyquist(*args, **kwargs):
     """
     Wrapper around control.nyquist_plot that always suppresses title
@@ -2304,6 +2333,8 @@ def nyquist(*args, **kwargs):
     kwargs.setdefault("title", "")
     return ct.nyquist_plot(*args, **kwargs)
 
+###########################################################################################
+###########################################################################################
 def write_latex_constants(S0, filename="./figs/constants.tex", idname=None, fmt="%.2f"):
     '''
     consts = {"wn": wn,
@@ -2328,6 +2359,8 @@ def write_latex_constants(S0, filename="./figs/constants.tex", idname=None, fmt=
             macro = sanitize_letters(name) + suffix
             f.write(r"\def\%s{%s}" % (macro, fmt % val) + "\n")
 
+###########################################################################################
+###########################################################################################
 def write_tf_latex(G, filename, label, sigfigs=4,
                    factor=False, inline=False,
                    name=None, time_constant=False,show=False):
@@ -2353,6 +2386,8 @@ def write_tf_latex(G, filename, label, sigfigs=4,
             f.write(latex_str + "\n")
             f.write("\\]\n")
 
+###########################################################################################
+###########################################################################################
 def normalize_tf(G):
     '''factor out non-unity gain for leading coefficient of the denominator'''
     if isinstance(G, ct.StateSpace):
@@ -2368,6 +2403,8 @@ def normalize_tf(G):
 
     return ct.tf(num,den)
 
+###########################################################################################
+###########################################################################################
 def find_double_real_poles(real_poles, tol=1e-5):
     """
     Identify real poles that occur more than once (within tolerance)
@@ -2395,6 +2432,8 @@ def find_double_real_poles(real_poles, tol=1e-5):
 
     return doubles
 
+###########################################################################################
+###########################################################################################
 def U(t):
     """
     Unit step function.
@@ -2413,6 +2452,8 @@ def U(t):
     return u
 
 
+###########################################################################################
+###########################################################################################
 def legend_best_combined(ax, candidates=None,
                          w_text=10.0, w_data=1.0,
                          **legend_kwargs):
@@ -2494,6 +2535,8 @@ def legend_best_combined(ax, candidates=None,
 
     return ax.legend(loc=best_loc, **legend_kwargs)
 
+###########################################################################################
+###########################################################################################
 def plot_spec_region(ax, zeta, wn, wd, color='m', highlight_color='r', linestyle='--'):
     """
     Draws the damping/angle spec lines used in your plots, but using the
