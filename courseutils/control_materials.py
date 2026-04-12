@@ -862,7 +862,7 @@ def find_wpi(omega, G, phi=np.pi, find_all=False, rtol=0.01):
     phase = np.angle(Gf)
     if np.abs(phi) > np.pi:
         print("Converting phase to radians")
-        phi = phi*np.pi/180.0
+        phi = phi/r2d
     phase_err = np.abs(np.angle(np.exp(1j * (phase - phi))))
 
     if not find_all:
