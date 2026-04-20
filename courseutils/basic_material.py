@@ -44,7 +44,7 @@ FIG_DIR = Path("./figs")
 
 def setup_environment(
     *,
-    verbose=True,
+    verbose=False,
     set_plot_style=True,
     create_dirs=True,
     check_packages=True
@@ -82,6 +82,7 @@ def setup_environment(
 
     try:
         import slycot
+        global SLYCOT_AVAILABLE
         SLYCOT_AVAILABLE = True
     except ImportError:
         pass

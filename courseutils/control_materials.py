@@ -25,6 +25,16 @@ import re
 
 from types import SimpleNamespace
 
+from pathlib import Path
+import sys
+
+# repo_root/16_06_Class/notebooks → repo_root/16_06_Class
+repo_root = Path.cwd().parents[0]
+sys.path.insert(0, str(repo_root / "16_06_Class"))
+
+import courseutils.basic_material as bm
+bm.setup_environment()
+
 # constants
 r2d = 180.0 / np.pi
 tpi = 2 * np.pi
@@ -200,9 +210,7 @@ def Root_Locus_gains(L, Krange=None, Tol=1e-5, standard_locus=True, Tol_max=1e3,
 
                 else:
                     if debug:
-                        print("Not Double? {kk:5.2f}",real_poles,double_real_poles,np.diff(real_poles))
-                    else:
-                        pass
+                        print(f"Not Double? {kk:5.2f}", real_poles, double_real_poles, np.diff(real_poles))
 
     except Exception as e:
         print("failed to find breakin/out points:", e)
@@ -266,15 +274,29 @@ def pshift(Gp, period = 2*np.pi):
 
     return Gp
 
-def wrap(phi, period = 2*np.pi):
-    '''wrap  the phase - units detected'''
-    # detect units
+def wrap(phi, period=None, boundary = 10):
+    """
+    Wrap phase to (-period/2, period/2].
+    
+    If period is None, auto-detects based on magnitude:
+      - |phi| > 10 → assumes degrees (period=360)
+      - |phi| ≤ 10 → assumes radians (period=2π)
+    
+    For ambiguous ranges (6 < |phi| < 400), pass period explicitly.
+    """
     phi = np.asarray(phi, dtype=float)
 
-    if np.max(np.abs(phi)) > 2*np.pi + 1e-3: # likely in degrees
-        period = 360.0
+    if period is None:
+        max_abs = np.nanmax(np.abs(phi))
+        if max_abs > boundary:
+            period = 360.0
+            logging.debug(f"wrap: auto-detected degrees (max|phi|={max_abs:.2f})")
+        else:
+            period = 2*np.pi
+            import logging
+            logging.debug(f"wrap: auto-detected radians (max|phi|={max_abs:.2f})")
 
-    return (phi + period//2) % (period) - period//2
+    return (phi + period/2) % period - period/2
 
 def wrap_phase_neg(phi, period=2*np.pi):
     """
@@ -293,9 +315,30 @@ def wrap_phase_neg(phi, period=2*np.pi):
 
 def Root_Locus_design_cancel(G, s_target=complex(-1, 2), s_cancel=-1, verbose=False):
     """
-    Root locus lead design by cancelling/placing pole at s_cancel to get CL poles at s_target.
-    Returns Gc, Gcl_poles()
+    Root locus lead design by pole/zero cancellation.
+    
+    Parameters
+    ----------
+    verbose : bool, default False
+        If True, return design details (3-tuple).
+        If False, return only compensator and poles (2-tuple).
+    
+    Returns
+    -------
+    Gc : TransferFunction
+        Lead compensator
+    poles : ndarray
+        Closed-loop poles
+    info : SimpleNamespace (only if verbose=True)
+        Contains phi_from_G, phi_required, LaTeX paragraph
     """
+
+    # Validate inputs
+    if not isinstance(G, (ct.TransferFunction, ct.StateSpace)):
+        raise TypeError("G must be control.TransferFunction or StateSpace")
+    
+    if s_target.real >= 0:
+        raise ValueError(f"s_target={s_target} must be in LHP (real < 0)")
 
     info = None
     Gczeros = np.array([np.real(s_cancel)])
@@ -362,6 +405,16 @@ def Root_Locus_design_ratio(G, s_target=complex(-1, 2), gamma=10, verbose=False,
     Root locus design using zero/pole ratio gamma.
     Returns Gc, Gcl_poles()
     """
+
+    # Validate inputs
+    if not isinstance(G, (ct.TransferFunction, ct.StateSpace)):
+        raise TypeError("G must be control.TransferFunction or StateSpace")
+    
+    if gamma <= 0:
+        raise ValueError(f"gamma={gamma} must be positive")
+    
+    if s_target.real >= 0:
+        raise ValueError(f"s_target={s_target} must be in LHP (real < 0)")
 
     sigma_t = -s_target.real
     omega_t = s_target.imag
@@ -684,39 +737,43 @@ class Step_info:
 
 ###########################################################################################
 ###########################################################################################
-def lead_design(G, wc_des = 1, PMdes = 45, verbose=None):
+def lead_design(G, wc_des = 1, PMdes = 45, verbose=None, phi_required = None):
     """
     Frequency Domain Lead Design
     """
-    Gf = G(1j*wc_des)
-    phi_G = wrap_phase_neg(np.angle(Gf)) * r2d # phase of plant at wc (degs)
-    PM =  wrap(180.0 + phi_G)
+    if phi_required is None:
+        Gf = G(1j*wc_des)
+        phi_G = wrap_phase_neg(np.angle(Gf)) * r2d # phase of plant at wc (degs)
+        PM =  wrap(180.0 + phi_G, period = 360.0)
+        if verbose:
+            print(f"Plant phase {phi_G:.2f}° , PMdes {PMdes:.2f}°, Current PM {PM:.2f}°, Phase required {PMdes - PM:.2f}°")
 
-    if verbose:
-        print(f"Plant phase {phi_G:.2f}° , PMdes {PMdes:.2f}°, Current PM {PM:.2f}°, Phase required {PMdes - PM:.2f}°")
+        phi_required = (PMdes - PM) / r2d  # rads
 
-    phi_required = (PMdes - PM) / r2d  # rads
     zdp = (1.0 - np.sin(phi_required)) / (1.0 + np.sin(phi_required))
     z = float(wc_des * np.sqrt(zdp))
     p = float(z / zdp)
 
     Gc_lead = ct.tf([1, z], [1, p])
     L = G * Gc_lead
-    k_c = 1.0 / np.abs(L(j * wc_des))
+    k_c = 1.0 / np.abs(L(1j * wc_des))
     Gc_lead *= k_c
 
-    latex_paragraph = (
-        f"The phase of the open-loop transfer function $G(j\\omega_c)$ at the desired crossover frequency "
-        f"is $\\phi_G = {phi_G:.2f}^\\circ$. Thus the required phase lead is calculated as "
-        f"$\\phi_required = {phi_required * r2d:.2f}^\\circ$. Using the phase lead equation $$\\dfrac{{z}}{{p}} = "
-        f"\\dfrac{{1 - \\sin(\\phi_required)}}{{1 + \\sin(\\phi_required)}} = {zdp:.3f}.$$ The zero and pole of the lead "
-        f"compensator are then placed at $z = {z:.2f}$ and $p = {p:.2f}$, respectively. Finally, the "
-        f"compensator gain is adjusted to achieve the desired crossover frequency, resulting in "
-        f"$k_c = {k_c:.2f}$. The resulting lead compensator transfer function is "
-        f"$G^{{lead}}_c(s) = {k_c:.2f}\\dfrac{{s+{z:.2f}}}{{s+{p:.2f}}}$"
-    )
-
     if verbose:
+        latex_paragraph = (
+            f"The phase of the open-loop transfer function $G(j\\omega_c)$ at the desired crossover frequency "
+            f"is $\\phi_G = {phi_G:.2f}^\\circ$. Thus the required phase lead is calculated as "
+            f"$\\phi_{{\\mathrm{{req}}}} = {phi_required * r2d:.2f}^\\circ$. "
+            f"Using the phase lead equation "
+            f"\\[\\dfrac{{z}}{{p}} = \\dfrac{{1 - \\sin({phi_required:.3f})}}{{1 + \\sin({phi_required:.3f})}} = {zdp:.3f}.\\] "
+            f"Given that $\\omega_c^2 = z p = {wc_des**2:.2f}$, "
+            f"the zero and pole of the lead compensator are then placed at "
+            f"$z = {wc_des:.2f} \\sqrt{{{zdp:.3f}}} = {z:.2f}$ and $p = {p:.2f}$, respectively. "
+            f"Finally, the compensator gain is adjusted to achieve the desired crossover frequency, resulting in "
+            f"$k_c = {k_c:.2f}$. "
+            f"The resulting lead compensator transfer function is "
+            f"\\[G^{{\\mathrm{{lead}}}}_c(s) = {k_c:.2f}\\,\\dfrac{{s+{z:.2f}}}{{s+{p:.2f}}}.\\]"
+        )
         return Gc_lead, latex_paragraph
     else:
         return Gc_lead
@@ -731,8 +788,8 @@ def lag_design(gain_inc=10, gamma=10, wc=1, verbose=False):
     pl = float(zl / gain_inc)
     if verbose:
         latex_paragraph = (
-            f"The lag compensator zero at $z_l = {zl:.2f}$ and pole at $p_l = {pl:.3f}$. "
-            f"Resulting lag compensator $G^{{lag}}_c(s) = \\dfrac{{s+{zl:.2f}}}{{s+{pl:.3f}}}$"
+            f"The lag compensator zero at $z_l = \\omega_c/\\gamma = {wc:.2f}/{gamma:.2f} ={zl:.2f}$ and pole at $p_l = z_l/{gain_inc:.2f} = {pl:.3f}$. "
+            f"Resulting lag compensator $$G^{{lag}}_c(s) = \\dfrac{{s+{zl:.2f}}}{{s+{pl:.3f}}}$$"
         )
         return ct.tf([1, zl], [1, pl]), latex_paragraph
     else:
@@ -847,38 +904,101 @@ def find_wc(omega, G, mag=1.0, find_all=False, rtol=0.01):
 
 ###########################################################################################
 ###########################################################################################
-def find_wpi(omega, G, phi=np.pi, find_all=False, rtol=0.01):
+def find_wphi(arg1, arg2, phi = 180, find_all = False, Tol = .5):
+    '''
+    find sytem gain when the system phase = phi in degrees
+    '''
+
+    # Detect argument order
+    if hasattr(arg1, "frequency_response") or hasattr(arg1, "evalfr"):
+        G = arg1
+        omega = arg2
+    else:
+        omega = arg1
+        G = arg2
+
+    Gf = G(1j*omega)  # complex freq response
+    idx = np.where(np.abs(phi - np.angle(Gf,deg=True)) < Tol)[0]
+
+    if len(idx) == 0:
+        return (None, None) if not find_all else (np.array([]), idx)
+
+    if find_all:
+        return omega[idx], idx
+    else:
+        return omega[idx[0]], idx[0]
+
+def find_wpi(omega, G, find_all=False, rtol=1e-3, atol=1e-8):
     """
-    Find frequency where arg(G(jw)) = phi (degrees)
-
-    If find_all is False
-        returns closest match (omega[idx], idx)
-
-    If find_all is True
-        returns all crossings (omega_hits, idx_hits)
+    Find frequencies where G(jw) lies on the negative real axis.
     """
     Gf, omega = _eval_Gjw(G, omega)
+    omega = np.asarray(omega)
 
-    phase = np.angle(Gf)
-    if np.abs(phi) > np.pi:
-        print("Converting phase to radians")
-        phi = phi*np.pi/180.0
-    phase_err = np.abs(np.angle(np.exp(1j * (phase - phi))))
+    re = np.real(Gf)
+    im = np.imag(Gf)
 
-    if not find_all:
-        idx = np.argmin(phase_err)
+    hits_w = []
+    hits_idx = []
+
+    for i in range(len(omega) - 1):
+        im0 = im[i]
+        im1 = im[i + 1]
+        re0 = re[i]
+        re1 = re[i + 1]
+
+        # exact hit at grid point i
+        if np.isclose(im0, 0.0, atol=atol) and re0 < 0:
+            hits_w.append(omega[i])
+            hits_idx.append(i)
+            continue
+
+        # exact hit at grid point i+1
+        if np.isclose(im1, 0.0, atol=atol) and re1 < 0:
+            hits_w.append(omega[i + 1])
+            hits_idx.append(i + 1)
+            continue
+
+        # crossing of real axis between samples
+        if im0 * im1 < 0:
+            denom = im0 - im1
+            if np.abs(denom) < 1e-14:
+                t = 0.5
+            else:
+                t = im0 / denom
+                t = np.clip(t, 0.0, 1.0)
+
+            w_hit = omega[i] + t * (omega[i + 1] - omega[i])
+            re_hit = re0 + t * (re1 - re0)
+
+            if re_hit < 0:
+                hits_w.append(w_hit)
+                hits_idx.append(i)
+
+    if len(hits_w) == 0:
+        if find_all:
+            return np.array([]), np.array([])
+        idx = np.argmin(np.abs(im) + 1e6 * (re >= 0))
         return omega[idx], idx
 
-    tol = rtol * np.pi
-    idx_raw = np.where(phase_err <= tol)[0]
+    hits_w = np.array(hits_w)
+    hits_idx = np.array(hits_idx)
 
-    if idx_raw.size == 0:
-        return np.array([]), np.array([])
+    # merge nearby duplicates
+    keep_w = [hits_w[0]]
+    keep_i = [hits_idx[0]]
+    for wv, iv in zip(hits_w[1:], hits_idx[1:]):
+        if not np.isclose(wv, keep_w[-1], rtol=rtol, atol=0):
+            keep_w.append(wv)
+            keep_i.append(iv)
 
-    groups = np.split(idx_raw, np.where(np.diff(idx_raw) > 1)[0] + 1)
-    idx = np.array([g[np.argmin(phase_err[g])] for g in groups])
+    keep_w = np.array(keep_w)
+    keep_i = np.array(keep_i)
 
-    return omega[idx], idx
+    if find_all:
+        return keep_w, keep_i
+
+    return keep_w[0], keep_i[0]
 
 ###########################################################################################
 ###########################################################################################
@@ -1003,12 +1123,11 @@ def color_rl(ax, ms=6, lw=1.75, verbose=False):
     """
     Change RL line colors and stacking order.
 
-    unique = cm.color_rl(ax,verbose=True)
-    ax.legend(unique.values(), unique.keys())
-
+    unique = cm.color_rl(ax, verbose=True)
+    if unique:
+        ax.legend(unique.values(), unique.keys())
     """
 
-    # stacking policy
     order = {
         "branch": 2,
         "pole": 4,
@@ -1019,48 +1138,45 @@ def color_rl(ax, ms=6, lw=1.75, verbose=False):
 
     for line in ax.lines:
 
-        # suppress rlocus legend duplication
-        if line.get_label().startswith("sys"):
+        label = line.get_label()
+        if isinstance(label, str) and label.startswith("sys"):
             line.set_label("_nolegend_")
 
         x = np.asarray(line.get_xdata())
         y = np.asarray(line.get_ydata())
 
-        # Skip completely empty lines (defensive)
         if x.size == 0 or y.size == 0:
             continue
 
         is_vertical = np.allclose(x, x[0])
         is_horizontal = np.allclose(y, y[0])
 
-        # root locus branches
-        if (line.get_linestyle() == "-" and line.get_marker() == "None" 
-            and not (is_vertical or is_horizontal)):
+        if (
+            line.get_linestyle() == "-"
+            and line.get_marker() == "None"
+            and not (is_vertical or is_horizontal)
+        ):
             line.set_linewidth(lw)
             line.set_color("blue")
             line.set_zorder(order["branch"])
 
-        # open loop poles
         elif line.get_marker() == "x":
             line.set_markersize(ms)
             line.set_markeredgecolor("blue")
             line.set_zorder(order["pole"])
 
-        # open loop zeros
         elif line.get_marker() == "o":
             line.set_markersize(ms)
             line.set_markerfacecolor("r")
             line.set_markeredgecolor("r")
             line.set_zorder(order["zero"])
 
-        # s0 diamonds
         elif line.get_marker() == "d":
             line.set_markersize(ms)
             line.set_markerfacecolor("m")
             line.set_markeredgecolor("m")
             line.set_zorder(order["s0"])
 
-        # scl squares
         elif line.get_marker() == "s":
             line.set_markersize(int(ms * 0.75))
             line.set_markerfacecolor("c")
@@ -1071,14 +1187,44 @@ def color_rl(ax, ms=6, lw=1.75, verbose=False):
         handles, labels = ax.get_legend_handles_labels()
         unique = {}
         for h, l in zip(handles, labels):
+            if not l or l == "_nolegend_":
+                continue
             if l not in unique:
                 unique[l] = h
         return unique
 
+    return None
 ###########################################################################################
 ###########################################################################################
-def Read_data(file_name, comments=["#", "F"], cols=[0]):
-    return np.loadtxt(file_name, comments=comments, delimiter=",", usecols=cols)
+def Read_data(file_name, comments=None, cols=None):
+    """Load data from a CSV file with specified comments and columns.
+
+    Parameters:
+    -----------
+    file_name : str
+        Path to the CSV file
+    comments : list, optional
+        Characters indicating comment lines. Default: ["#", "F"]
+    cols : list, optional
+        Columns to read. Default: [0]
+    """
+    file_path = Path(file_name)
+    
+    if not file_path.exists():
+        raise FileNotFoundError(f"Data file not found: {file_path}")
+    
+    # Preserve the existing default behavior
+    if comments is None:
+        comments = ["#", "F"]
+    
+    try:
+        data = np.loadtxt(file_path, comments=comments)
+    except ValueError as e:
+        raise ValueError(f"Failed to parse {file_name}: {e}") from e
+    
+    if cols is not None:
+        return data[:, cols]
+    return data
 
 ###########################################################################################
 ###########################################################################################
@@ -1394,21 +1540,16 @@ def pretty_row_print(X,msg="",sigfigs=None,decimals=3,complex_decimals=2,verbose
 
     Exactly one of sigfigs or decimals should be used.
     """
-
-    if isinstance(X, str):     # detect swapped arguments
+    if isinstance(X, str):
         X, msg = msg, X
 
     if sigfigs is not None:
-        decimals = None 
+        decimals = None
 
-    # normalize scalar to 1 element array
     X = np.asarray(X).squeeze().ravel()
 
     def fmt_real(x):
-        if sigfigs is not None:
-            return f"{x:.{sigfigs}g}"
-        else:
-            return f"{x:.{decimals}f}"
+        return f"{x:.{sigfigs}g}" if sigfigs is not None else f"{x:.{decimals}f}"
 
     def fmt_complex(x):
         r = x.real
@@ -1421,27 +1562,23 @@ def pretty_row_print(X,msg="",sigfigs=None,decimals=3,complex_decimals=2,verbose
             r_str = f"{r:.{complex_decimals}f}"
             i_mag_str = f"{abs(i):.{complex_decimals}f}"
 
-        # purely real
         if abs(i) < 1e-12:
             return r_str
 
-        # purely imaginary
         if abs(r) < 1e-12:
             sign = "-" if i < 0 else ""
             return f"({sign}{i_mag_str}i)"
 
-        # full complex
         sign = "-" if i < 0 else "+"
         return f"({r_str} {sign} {i_mag_str}i)"
 
     out = []
     for x in X:
         x = complex(x)
-        if np.iscomplexobj(x) and abs(x.imag) > 0:
+        if abs(x.imag) > 1e-12:
             out.append(fmt_complex(x))
         else:
             out.append(fmt_real(x.real))
-
 
     body = ", ".join(out)
 
@@ -1449,18 +1586,17 @@ def pretty_row_print(X,msg="",sigfigs=None,decimals=3,complex_decimals=2,verbose
         row = f"{msg} {body}".strip()
     else:
         if isinstance(bracket, str):
-            if len(bracket) != 2:
-                raise ValueError("bracket must be 2 chars like '[]'")
             left, right = bracket
         else:
             left, right = bracket
-
         row = f"{msg} {left}{body}{right}".strip()
 
     if verbose:
         return row
     else:
-        display(HTML(f"<pre style='font-size:14px'>{row}</pre>"))
+        display(HTML(
+            f"<pre style='font-size:12px; margin:0; line-height:1.15;'>{row}</pre>"
+        ))
 
 ###########################################################################################
 ###########################################################################################
@@ -1746,19 +1882,31 @@ def tf_to_latex(G, sigfigs=2, factor=False, time_constant=False):
 
 ###########################################################################################
 ###########################################################################################
-def _matrix_to_latex(M, sigfigs=4):
+def _matrix_to_latex(M, sigfigs=4, tol=1e-12, exp_thresh=1e-3):
     M = np.atleast_2d(np.array(M, dtype=float))
+
+    def fmt(x):
+        if abs(x) < tol:
+            return "0"
+
+        # use exponential form for small/large numbers
+        if abs(x) < exp_thresh or abs(x) >= 10/exp_thresh:
+            mant, exp = f"{x:.{sigfigs}e}".split("e")
+            exp = int(exp)
+            return rf"{mant}e^{{{exp}}}"
+        else:
+            return f"{x:.{sigfigs}g}"
+
     rows = []
     for row in M:
-        rows.append(
-            " & ".join(f"{x:.{sigfigs}g}" for x in row)
-        )
+        rows.append(" & ".join(fmt(x) for x in row))
+
     body = r" \\ ".join(rows)
     return r"\begin{bmatrix} " + body + r" \end{bmatrix}"
 
 ###########################################################################################
 ###########################################################################################
-def show_ss_latex(P, label=None, sigfigs=4, name=None):
+def show_ss_latex(P, label=None, sigfigs=4, name=None, show=True):
     """
     Display a StateSpace system as LaTeX with A, B, C, D matrices.
     """
@@ -1766,12 +1914,12 @@ def show_ss_latex(P, label=None, sigfigs=4, name=None):
     if not isinstance(P, ct.StateSpace):
         raise TypeError("Input must be a control.StateSpace object")
 
-    # detect discrete vs continuous
-    try:
-        is_discrete = ct.isdtime(P)
-    except Exception:
-        dt = getattr(P, "dt", None)
-        is_discrete = isinstance(dt, (int, float)) and dt > 0
+    dt = getattr(P, "dt", None)
+
+    if dt is None or dt == 0:
+        is_discrete = False
+    else:
+        is_discrete = True
 
     var = "k" if is_discrete else "t"
 
@@ -1806,9 +1954,15 @@ def show_ss_latex(P, label=None, sigfigs=4, name=None):
         )
 
     if label:
-        return Math(label + ":\n" + eqn)
+        latex_str = label + ":\n" + eqn
     else:
-        return Math(eqn)
+        latex_str = eqn
+
+    if show:
+        display(Math(latex_str))
+        return None
+    else:
+        return Math(latex_str)
 
 ###########################################################################################
 ###########################################################################################
@@ -1891,74 +2045,74 @@ def residue_tf(G, time_constant=False, tol=1e-12):
 
 ###########################################################################################
 ###########################################################################################
-def factors_to_latex(real_roots, quads, var="s",sigfigs=4, tol=1e-8,time_constant=False):
-
+def factors_to_latex(real_roots, quads, var="s", sigfigs=4, tol=1e-8, time_constant=False):
     parts = []
 
-    # ---- handle real roots ----
+    real_roots = list(np.asarray(real_roots, dtype=float))
+
+    quads_out = []
+    for B, C in quads:
+        disc = B * B - 4 * C
+        scale = max(1.0, abs(B * B), abs(C))
+        if abs(disc) <= tol * scale:
+            r = -B / 2.0
+            real_roots.extend([r, r])
+        else:
+            quads_out.append((B, C))
+
     real_roots = np.asarray(real_roots, dtype=float)
 
-    # count zero roots separately (integrators)
     zero_mask = np.abs(real_roots) < tol
     n_zero = np.sum(zero_mask)
 
-    # emit integrator factor
     if n_zero == 1:
         parts.append(var)
     elif n_zero > 1:
         parts.append(f"{var}^{n_zero}")
 
-    # nonzero real roots
     nz_roots = real_roots[~zero_mask]
 
     if len(nz_roots) > 0:
-        # round first to stabilize duplicates
+        # preserve incoming order
         nz_roots = np.round(nz_roots, sigfigs)
 
-        # cluster WITHOUT reordering
         clustered = []
         for r in nz_roots:
             if not clustered:
                 clustered.append([r, 1])
             else:
-                if abs(r - clustered[-1][0]) <= tol:
+                if abs(r - clustered[-1][0]) <= tol * max(1.0, abs(clustered[-1][0])):
                     clustered[-1][1] += 1
                 else:
                     clustered.append([r, 1])
 
         for r, mult in clustered:
-            a = -r  # since factor is (s - r) = (s + a)
+            a = -r
 
             if time_constant and abs(a) > tol:
                 a_fmt = fmt(abs(a), sigfigs)
-
                 if a > 0:
                     factor = rf"\left(\frac{{{var}}}{{{a_fmt}}}+1\right)"
                 else:
                     factor = rf"\left(\frac{{{var}}}{{{a_fmt}}}-1\right)"
-
             else:
                 if a > 0:
                     factor = f"({var}+{fmt(a, sigfigs)})"
                 else:
                     factor = f"({var}-{fmt(abs(a), sigfigs)})"
 
-            # attach exponent if repeated
             if mult > 1:
                 factor += f"^{mult}"
 
             parts.append(factor)
 
-    # ---- handle quadratic factors ----
-    for B, C in quads:
+    for B, C in quads_out:
         quad = f"{var}^2"
 
-        # B term
         if abs(B) > tol:
             signB = "-" if B < 0 else "+"
             quad += f"{signB}{fmt(abs(B), sigfigs)}{var}"
 
-        # C term
         if abs(C) > tol:
             signC = "-" if C < 0 else "+"
             quad += f"{signC}{fmt(abs(C), sigfigs)}"
@@ -2256,9 +2410,8 @@ def factor_poly_real(coeffs, tol=1e-6):
     coeffs: highest to lowest
     returns:
         K          : leading coefficient
-        real_roots : list of real roots (sorted by increasing |root|)
-        quads      : list of (B, C) for s^2 + B s + C,
-                     sorted by increasing |root|
+        real_roots : list of real roots, with repeats preserved
+        quads      : list of (B, C) for s^2 + B s + C
     """
     coeffs = np.atleast_1d(np.asarray(coeffs, dtype=float))
 
@@ -2279,42 +2432,56 @@ def factor_poly_real(coeffs, tol=1e-6):
         imag_tol = tol * (1.0 + abs(r.real))
 
         if abs(r.imag) <= imag_tol:
-            real_roots.append(r.real)
+            real_roots.append(float(r.real))
             used[i] = True
             continue
 
         for j in range(i + 1, len(roots)):
-            if not used[j] and abs(roots[j] - np.conj(r)) <= imag_tol:
-                used[i] = used[j] = True
-                a = r.real
-                b = abs(r.imag)
+            if used[j]:
+                continue
+            if abs(roots[j] - np.conj(r)) <= imag_tol:
+                used[i] = True
+                used[j] = True
+                a = float(r.real)
+                b = float(abs(r.imag))
                 quads.append((-2*a, a*a + b*b))
                 break
 
-    # -------- NEW: cluster real roots --------
+    # convert nearly repeated-root quadratics into double real roots
+    quads_out = []
+    extra_real_roots = []
+
+    for B, C in quads:
+        disc = B*B - 4*C
+        disc_tol = tol * max(1.0, abs(B*B), abs(C))
+        if abs(disc) <= disc_tol:
+            r = -B / 2.0
+            extra_real_roots.extend([r, r])
+        else:
+            quads_out.append((B, C))
+
+    real_roots.extend(extra_real_roots)
+
+    # cluster real roots numerically, but preserve multiplicity by re-expanding
     real_roots.sort()
     clustered = []
 
     for r in real_roots:
         if not clustered:
             clustered.append([r, 1])
+        elif abs(r - clustered[-1][0]) <= tol * max(1.0, abs(clustered[-1][0])):
+            clustered[-1][1] += 1
         else:
-            if abs(r - clustered[-1][0]) <= tol:
-                clustered[-1][1] += 1
-            else:
-                clustered.append([r, 1])
+            clustered.append([r, 1])
 
-    # convert back to list with multiplicity
-    # convert back to list with multiplicity
-    real_roots = []
+    real_roots_out = []
     for r, mult in clustered:
-        real_roots.extend([r]*mult)
+        real_roots_out.extend([r] * mult)
 
-    # final deterministic ordering
-    real_roots = sorted(real_roots, key=lambda r: (abs(r), r))
-    quads = sorted(quads, key=lambda q: (q[1], q[0]))
+    real_roots_out = sorted(real_roots_out, key=lambda r: (abs(r), r))
+    quads_out = sorted(quads_out, key=lambda q: (q[1], q[0]))
 
-    return K, real_roots, quads
+    return K, real_roots_out, quads_out
 
 ###########################################################################################
 ###########################################################################################
@@ -2335,7 +2502,7 @@ def nyquist(*args, **kwargs):
 
 ###########################################################################################
 ###########################################################################################
-def write_latex_constants(S0, filename="./figs/constants.tex", idname=None, fmt="%.2f"):
+def write_latex_constants(S0, filename="./figs/constants.tex", idname=None, fmt="%.2f", sigfigs=None):
     '''
     consts = {"wn": wn,
         "zeta": zeta,
@@ -2345,8 +2512,11 @@ def write_latex_constants(S0, filename="./figs/constants.tex", idname=None, fmt=
     idname
     fmt="%.2f"
     '''
-    def sanitize_letters(s):
+    if sigfigs is not None:
         # allow letters only (TeX control sequence safe)
+        fmt = f"%.{sigfigs}f"
+
+    def sanitize_letters(s):
         return re.sub(r"[^A-Za-z]", "", s)
 
     suffix = ""
@@ -2574,3 +2744,49 @@ def plot_spec_region(ax, zeta, wn, wd, color='m', highlight_color='r', linestyle
     y_line_high = -x_line * np.tan(th)
     ax.plot(x_line, y_line_high, color=highlight_color, linestyle='-')
     ax.plot(x_line, -y_line_high, color=highlight_color, linestyle='-')
+
+###########################################################################################
+###########################################################################################
+def clone_blank_axis(ax):
+    # handle array of axes
+    if isinstance(ax, np.ndarray):
+        fig = ax.flat[0].figure
+        shape = ax.shape
+    else:
+        fig = ax.figure
+        shape = (1,)
+
+    # new figure
+    new_fig, new_ax = plt.subplots(*shape, figsize=fig.get_size_inches(), dpi=fig.dpi)
+
+    # flatten for easy looping
+    ax_list = ax.flat if isinstance(ax, np.ndarray) else [ax]
+    new_ax_list = new_ax.flat if isinstance(new_ax, np.ndarray) else [new_ax]
+
+    for a, na in zip(ax_list, new_ax_list):
+        na.set_xlim(a.get_xlim())
+        na.set_ylim(a.get_ylim())
+
+        na.set_xscale(a.get_xscale())
+        na.set_yscale(a.get_yscale())
+
+        na.set_xlabel(a.get_xlabel())
+        na.set_ylabel(a.get_ylabel())
+        na.set_title(a.get_title())
+
+        na.set_xticks(a.get_xticks())
+        na.set_yticks(a.get_yticks())
+
+        bm.nicegrid(na)
+
+    return new_fig, new_ax
+
+###########################################################################################
+###########################################################################################
+def compute_Nbar(G, K):
+    ''' Find Nbar so that the steady state response to a step input is 1.0 
+    for the SISO closed loop system using feedback gain u=-Kx.'''
+    A, B, C = G.A, G.B, G.C
+    X = np.linalg.solve(A - B @ K, B)
+    Nbar = 1.0 / (-C @ X).item()
+    return Nbar

@@ -201,7 +201,7 @@ def design_process(G, Mp = None, Tr = None, Tp = None, Ts = None, ess_step = Non
     for iter_count in range(max_iter):
         if Gc_lag is None:
             Gc_lag = ct.tf(1,1)
-        print("\nDesiging lead compensator")
+        print("\nDesigning lead compensator")
         Gc_lead, _, lead_info = cm.Root_Locus_design_cancel(G*G_pert*Gc_lag, s_target = s_target, s_cancel = s_cancel, verbose=True)
         Gc_lead *= G_pert # if integrator needed, then add it to the lead compensator
         cm.show_tf_latex(Gc_lead, f"G_{{c_{{lead}}}}^{{(iter {iter_count+1})}}",show=True,factor=True)
@@ -352,7 +352,8 @@ def design_process(G, Mp = None, Tr = None, Tp = None, Ts = None, ess_step = Non
             ax_inset.plot(np.real(Gc_lag.poles()), np.imag(Gc_lag.poles()), 'mx', ms=8, label='Lag Pole',zorder=10)
 
         scale = np.ceil(np.abs(s_target)*1)
-        offset = np.sum(G.poles().real)/len(G.poles())
+        poles = G.poles()
+        offset = np.sum(poles.real) / len(poles) if len(poles) > 0 else 0
         shrink = 10
         ax_inset.axis('equal')
         inset_max_x = max(scale/shrink+s_target.real,1)
@@ -369,7 +370,7 @@ def design_process(G, Mp = None, Tr = None, Tp = None, Ts = None, ess_step = Non
         ax1.set_title('K > 0',loc='left')
         try:
             plt.title(r'$\gamma={:3.1f}$'.format(gamma),loc='right')
-        except:
+        except (RuntimeError, TypeError, ValueError):
             pass
 
         # Create custom legend handles
@@ -462,21 +463,39 @@ def design_process(G, Mp = None, Tr = None, Tp = None, Ts = None, ess_step = Non
         info.Gc = Gc
     return info
 
-def find_ess(G, type = 'step'):
+def find_ess(G, type='step'):
+    """
+    Find steady-state error for step or ramp input.
+
+    Parameters:
+    -----------
+    G : TransferFunction
+        Open-loop transfer function
+    type : str
+        'step' or 'ramp' (default: 'step')
+
+    Returns:
+    --------
+    float or None
+        Steady-state error, or None if calculation fails
+    """
     if type == 'step':
         K = cm.find_Kp(G)
         if K is not None:
             return 1/(1+K)
         else:
             print('Kp error')
+            return None
     elif type == 'ramp':
         K = cm.find_Kv(G)
         if np.abs(K) > 0:
             return 1/K
         else:
             print('Kv error')
-    print("Unknown type")
-    return None
+            return None
+    else:
+        print(f"Unknown type: {type}")
+        return None
 
 if __name__ == "__main__":
     # Example usage:
