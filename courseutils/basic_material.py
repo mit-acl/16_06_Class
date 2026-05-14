@@ -15,6 +15,7 @@ import importlib.util
 from pathlib import Path
 import control
 import numpy as np
+from simple_colors import *
 
 float_formatter = "{:.4f}".format
 np.set_printoptions(formatter={'float': '{: 8.3f}'.format})
@@ -158,7 +159,13 @@ def get_colors():
     return [
         "blue", "red", "darkgreen", "magenta", "black",
         "salmon", "brown", "darkblue", "tomato", "violet",
-        "tan", "pink"]
+        "tan", "pink", 'SaddleBrown', 'SpringGreen', 'RosyBrown','Silver',]
+
+def print_blue(msg):
+    print(blue(msg))
+def print_green(msg):
+    print(green(msgs, 'bold'))
+#print(green('hello', ['bold', 'underlined']))
 
 def nicegrid(ax, hh=None): #hh is legacy
     """

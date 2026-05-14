@@ -274,6 +274,13 @@ def pshift(Gp, period = 2*np.pi):
 
     return Gp
 
+def wfrac(wc_des=1, w=np.logspace(-1,1,100), verbose=True):
+    wmin, wmax = w.min(), w.max() 
+    frac = np.round((np.log10(wc_des) - np.log10(wmin)) / (np.log10(wmax) - np.log10(wmin)), 2)
+    if verbose:
+        print(f"wc_des falls at {frac:.2f} of w")
+    return frac
+
 def wrap(phi, period=None, boundary = 10):
     """
     Wrap phase to (-period/2, period/2].
@@ -904,12 +911,7 @@ def find_wc(omega, G, mag=1.0, find_all=False, rtol=0.01):
 
 ###########################################################################################
 ###########################################################################################
-def find_wphi(arg1, arg2, phi = 180, find_all = False, Tol = .5):
-    '''
-    find sytem gain when the system phase = phi in degrees
-    '''
-
-    # Detect argument order
+def find_wphi(arg1, arg2, phi=180, find_all=False):
     if hasattr(arg1, "frequency_response") or hasattr(arg1, "evalfr"):
         G = arg1
         omega = arg2
@@ -917,16 +919,31 @@ def find_wphi(arg1, arg2, phi = 180, find_all = False, Tol = .5):
         omega = arg1
         G = arg2
 
-    Gf = G(1j*omega)  # complex freq response
-    idx = np.where(np.abs(phi - np.angle(Gf,deg=True)) < Tol)[0]
+    Gf = G(1j * omega)
+    phase = np.angle(Gf, deg=True)
+
+    # wrap error to [-180, 180]
+    err = (phase - phi + 180) % 360 - 180
+
+    idx = np.where(np.diff(np.sign(err)) != 0)[0]
 
     if len(idx) == 0:
         return (None, None) if not find_all else (np.array([]), idx)
 
+    w_cross = []
+    for i in idx:
+        w1, w2 = omega[i], omega[i+1]
+        e1, e2 = err[i], err[i+1]
+
+        wc = w1 - e1 * (w2 - w1) / (e2 - e1)
+        w_cross.append(wc)
+
+    w_cross = np.array(w_cross)
+
     if find_all:
-        return omega[idx], idx
+        return w_cross, idx
     else:
-        return omega[idx[0]], idx[0]
+        return w_cross[0], idx[0]
 
 def find_wpi(omega, G, find_all=False, rtol=1e-3, atol=1e-8):
     """
